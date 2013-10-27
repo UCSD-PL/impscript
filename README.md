@@ -1,4 +1,4 @@
 impscript
 =========
 
-Typing JavaScript, imperatively
+ImpScript: Gradual Types for JavaScript

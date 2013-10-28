@@ -57,7 +57,7 @@ and mapStmt_ fE fS = function
   | SLoadedSrc(f,s) -> fS (SLoadedSrc (f, mapStmt fE fS s))
   | SExternVal(x,t,s) -> fS (SExternVal (x, t, mapStmt fE fS s))
 
-(* [e; undefined] is inserted often by LamJS parsing *)
+(* [e; undefined] is inserted often by LamJS and ImpScript parsing *)
 let removeUndefs stmt =
   mapStmt
     (fun x -> x)

@@ -85,13 +85,7 @@ exp_ :
  | LPAREN s=typ EQARROW t=typ RPAREN   { ECast (s, t) }
  | e=exp AS t=typ                      { EAs (e, t) }
 
- (* in cast insertion mode, throw away any casts that appeared in the source
-    file, as these were inserted by the previous pass of cast insertion *)
-
- | e=exp LPAREN es=separated_list(COMMA,exp) RPAREN
-     { match !Settings.castInsertionMode, e.exp, es with
-         | true, ECast _, [e1] -> e1.exp
-         | _                   -> EApp (e, es) }
+ | e=exp LPAREN es=separated_list(COMMA,exp) RPAREN { EApp (e, es) }
 
  | FUN LPAREN xts=separated_list(COMMA,formal) RPAREN
      tRetOpt=option(func_ret_type)

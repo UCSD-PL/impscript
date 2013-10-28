@@ -1,0 +1,15 @@
+
+(*** ../tests/simple-0/negate.1.is ***)
+
+extern val _plus : (num, num) -> num
+extern val _minus : (num, num) -> num
+extern val _eek : (str, str) -> bool
+extern val _typeof : (any) -> str
+extern val _not : (bool) -> bool
+var negate; negate = function (x: (bool | num)) -> (bool | num) {
+  if (_eek(_typeof(x), "number")) {
+    return _minus(0, ((bool | num) => num)(x));
+  } else {
+    return _not(((bool | num) => bool)(x));
+  }
+};

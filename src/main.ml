@@ -4,16 +4,33 @@ open Lexing
 let pr = Printf.printf
 let spr = Printf.sprintf
 
+let (|>) x f = f x
+
 
 (***** Command-line options ***************************************************)
 
 let srcFiles  = ref []
 
-let usage = "\nUsage: ./impscript [options] (src_file.js | src_file.n.is)\n"
+let usage =
+    "\n"
+  ^ "Usage: ./impscript [options] (file.js | file.is | file.n.is)\n"
+  ^ "\n"
+  ^ "  Input       Mode\n"
+  ^ "  ---------   -----------------------------------------------\n"
+  ^ "\n"
+  ^ "  file.js     1) Desugar JavaScript to ImpScript file.0.is\n"
+  ^ "              2) Type check and insert casts in file.1.is\n"
+  ^ "              3) Type check file.1.is (sanity check)\n"
+  ^ "\n"
+  ^ "  file.n.is   1) Type check and insert casts in file.n+1.is\n"
+  ^ "              2) Type check file.n+1.is (sanity check)\n"
+  ^ "\n"
+  ^ "  file.is     1) Type check file.is\n"
+  ^ "\n"
+  ^ "  Options\n"
+  ^ "  -----------------------------------------------------------"
 
 let argSpecs = [
-  ("-parseOnly", Arg.Set Settings.parseOnly,
-              "");
 (*
   ("-checkingMode", Arg.Unit (fun () -> Settings.castInsertionMode := false),
                  "     check program without inserting casts");
@@ -22,6 +39,9 @@ let argSpecs = [
 
 let anonArgFun s =
   srcFiles := !srcFiles @ [s]
+
+
+(***** Execution Modes ********************************************************)
 
 let stripSuffix s suf =
   if Str.string_match (Str.regexp (spr "\\(.*\\)%s$" suf)) s 0
@@ -32,6 +52,22 @@ let stripNumericSuffix s =
   if Str.string_match (Str.regexp "\\(.*\\)[.]\\([0-9]+\\)$" ) s 0
   then Some (Str.matched_group 1 s, int_of_string (Str.matched_group 2 s))
   else None
+
+type mode =
+  | JavaScript of string                  (* file.js   *)
+  | ImpScriptInsertCasts of string * int  (* file.n.js *)
+  | ImpScriptCheckCasts of string         (* file.is   *)
+
+let modeOf f =
+  (match stripSuffix f ".js" with
+     | Some(fPrefix) -> Some (JavaScript fPrefix)
+     | None ->
+         (match stripSuffix f ".is" with
+           | Some(fPrefix) ->
+               (match stripNumericSuffix fPrefix with
+                  | Some(fPrefix,n) -> Some (ImpScriptInsertCasts (fPrefix, n))
+                  | None -> Some (ImpScriptCheckCasts fPrefix))
+           | None -> None))
 
 
 (***** Parsing ****************************************************************)
@@ -71,13 +107,15 @@ let parseJStoEJS f =
     (JavaScript.parse_javascript_from_channel (open_in f) f)
 
 let doParseJavaScript f =
-  LangUtils.sLoaded f (Desugar.desugar (parseJStoEJS f))
+  f |> parseJStoEJS
+    |> Desugar.desugar
+    |> LangUtils.sLoaded f
+    |> LangUtils.removeUndefs
 
 let doParseImpScript f =
-  LangUtils.sLoaded f (doParse LangParser.program f)
-
-
-(***** Main *******************************************************************)
+  f |> doParse LangParser.program
+    |> LangUtils.sLoaded f
+    |> LangUtils.removeUndefs
 
 let rec addPrelude prelude prog =
   match prelude.Lang.stmt with
@@ -86,47 +124,50 @@ let rec addPrelude prelude prog =
     | Lang.SLoadedSrc(f,s) ->
         LangUtils.wrapStmt (Lang.SLoadedSrc (f, addPrelude s prog))
     | Lang.SExp _ -> prog
-    | _ -> failwith (Printer.strStmtAst prelude)
+    | _ ->
+        failwith (spr "addPrelude\n%s" (Printer.strStmtAst prelude))
 
-let runTc prog f =
-  let prog = Typing.typecheck prog in
-  Log.log1 "\n%s\n" (Utils.greenString "TC + CASTS: OK");
-  Printer.printStmt prog f;
-  (* sanity check that casts are sufficient *)
+
+(***** Main *******************************************************************)
+
+let tcCheckCasts prog =
   Settings.castInsertionMode := false;
   ignore (Typing.typecheck prog);
   Log.log1 "\n%s\n" (Utils.greenString "TC: OK");
   () 
 
+let tcInsertCasts prog f =
+  Settings.castInsertionMode := true;
+  let prog = Typing.typecheck prog in
+  Log.log1 "\n%s\n" (Utils.greenString "TC + CASTS: OK");
+  Printer.printStmt prog f;
+  (* sanity check that the inserted casts are sufficient for typing *)
+  tcCheckCasts prog;
+  ()
+
+let parseAndProcessFile f = function
+  | JavaScript(fPrefix) -> begin
+      let prog = doParseJavaScript f in
+      let prelude = doParseImpScript Settings.prims_file in
+      let prog = addPrelude prelude prog in
+      Log.log1 "\n%s\n" (Utils.greenString "DESUGARING: OK");
+      Printer.printStmt prog (spr "%s.0.is" fPrefix);
+      tcInsertCasts prog (spr "%s.1.is" fPrefix);
+    end
+  | ImpScriptInsertCasts(fPrefix,n) -> 
+      let prog = doParseImpScript f in
+      tcInsertCasts prog (spr "%s.%d.is" fPrefix (succ n))
+  | ImpScriptCheckCasts(fPrefix) ->
+      let prog = doParseImpScript f in
+      tcCheckCasts prog
+
 let _ =
   Arg.parse argSpecs anonArgFun usage;
-  let (prog,fPrefix,jsMode) =
-    match !srcFiles with
-      | [ ] ->
-          (LangUtils.sExp (LangUtils.eStr "no source file"), "out/dummy", true)
-      | [f] ->
-          begin match stripSuffix f ".js", stripSuffix f ".is" with
-            | Some(fPrefix), _ -> (doParseJavaScript f, fPrefix, true)
-            | _, Some(fPrefix) -> (doParseImpScript f, fPrefix, false)
-            | _ -> (Log.log1 "%sBad file suffix\n" usage; Log.terminate ())
-          end
-      | _ -> (Log.log1 "%s" usage; Log.terminate ())
-  in
-  if !Settings.parseOnly then begin
-    Log.log1 "\n%s\n" (Utils.greenString "PARSE: OK");
-    exit 0
-  end;
-  let prog = LangUtils.removeUndefs prog in
-  if jsMode then begin
-    let prelude = doParseImpScript Settings.prims_file in
-    let prog = addPrelude prelude prog in
-    Log.log1 "\n%s\n" (Utils.greenString "DESUGARING: OK");
-    Printer.printStmt prog (spr "%s%s" fPrefix ".is");
-    runTc prog (spr "%s.1.is" fPrefix);
-  end else begin
-    match stripNumericSuffix fPrefix with
-      | Some(fPrefix,n) -> runTc prog (spr "%s.%d.is" fPrefix (succ n))
-      | None -> (Log.log1 "%s" usage; Log.terminate ())
-  end;
-  ()
+  match !srcFiles with
+    | [ ] -> exit 0
+    | [f] -> (match modeOf f with
+                | Some(mode) -> parseAndProcessFile f mode
+                | None -> (Log.log1 "%s\n\nBad file suffix\n" usage;
+                           Log.terminate ()))
+    | _   -> (Log.log1 "%s" usage; Log.terminate ())
 

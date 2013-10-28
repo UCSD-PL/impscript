@@ -1,0 +1,6 @@
+out/
+_build/
+impscript
+tests/*/*.[0-9].is
+/*/*.swp
+/*/*/*.swp

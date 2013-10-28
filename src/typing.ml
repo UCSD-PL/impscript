@@ -76,6 +76,9 @@ let rec tcExp typeEnv heapEnv exp = match exp.exp with
             end
       end
 
+  | EFun(xs,body) when !Settings.castInsertionMode = false ->
+      failwith "unannotated functions should not appear in checking mode"
+
   | EFun(xs,body) ->
       let typeEnv =
         List.fold_left (fun acc x -> VarMap.add x StrongRef acc)
@@ -96,7 +99,7 @@ let rec tcExp typeEnv heapEnv exp = match exp.exp with
         then failwith "add handling for len(actuals) != len(formals)" in
       let typeEnv =
         List.fold_left (fun acc x -> VarMap.add x StrongRef acc)
-          (VarMap.add "@ret" (InvariantRef TAny) typeEnv) xs in
+          (VarMap.add "@ret" (InvariantRef tRet) typeEnv) xs in
       let heapEnvFun =
         List.fold_left (fun acc (x,t) -> VarMap.add x t acc) 
           VarMap.empty (List.combine xs tArgs) in
@@ -104,6 +107,18 @@ let rec tcExp typeEnv heapEnv exp = match exp.exp with
       if sub (tBody, tRet)
       then (eAs (eFun xs body) tArrow, tArrow, heapEnv, Types.empty)
       else failwith "annotated fun has bad fall-thru type: "
+
+  (* discard casts inserted in previous phase when compiling in this phase *)
+  | EApp({exp=ECast _},eArgs) when !Settings.castInsertionMode ->
+      begin match eArgs with
+        | [e1] -> tcExp typeEnv heapEnv e1
+        | _ -> failwith "casts should only have one argument"
+      end
+
+  | ECast(s,t) ->
+      if !Settings.castInsertionMode
+      then failwith "cast should've been caught above"
+      else (exp, TArrow ([s], t), heapEnv, Types.empty)
 
   | EApp(eFun,eArgs) ->
       let (eFun,tFun,heapEnv,retTypes) = tcExp typeEnv heapEnv eFun in
@@ -136,11 +151,6 @@ let rec tcExp typeEnv heapEnv exp = match exp.exp with
   | EAs(e,t) ->
       let _ = tcExp typeEnv heapEnv e in
       failwith "tcExp EAs: non-function value"
-
-  | ECast(s,t) ->
-      if !Settings.castInsertionMode
-      then failwith "cast should've been discarded by parser in insertion mode"
-      else (exp, TArrow ([s], t), heapEnv, Types.empty)
 
 and tcStmt typeEnv heapEnv stmt = match stmt.stmt with
 

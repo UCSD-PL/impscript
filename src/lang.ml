@@ -16,6 +16,14 @@ type typ =
   | TAny
   | TBot
 
+module Heap = Set.Make (struct type t = (var * typ) let compare = compare end)
+
+type heap = Heap.t
+
+type pre_typ =
+  | Typ of typ
+  | OpenArrow of heap * typ list * typ
+
 type base_val =
   | VNum of float
   | VBool of bool
@@ -28,7 +36,7 @@ type exp_ =
   | EVarRead of var
   | EFun of var list * stmt
   | EApp of exp * exp list
-  | EAs of exp * typ
+  | EAs of exp * pre_typ
   | ECast of typ * typ
 
 and stmt_ =
@@ -40,6 +48,7 @@ and stmt_ =
   | SIf of exp * stmt * stmt
   | SWhile of exp * stmt
   | SVarInvariant of var * typ * stmt
+  | SClose of var list * stmt
   | SLoadedSrc of string * stmt
   | SExternVal of var * typ * stmt
 
@@ -55,7 +64,9 @@ module VarMap = Map.Make (struct type t = var let compare = compare end)
 
 type type_env = type_env_binding VarMap.t
 
-type heap_env = typ VarMap.t
+type heap_env = pre_typ VarMap.t
+
+module Vars = Set.Make (struct type t = var let compare = compare end)
 
 module Types = Set.Make (struct type t = typ let compare = compare end)
 

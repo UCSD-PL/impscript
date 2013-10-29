@@ -11,7 +11,7 @@ extern val _not : (bool) -> bool
 
 var c; c = 0;
 var inc;
-invariant c : num
+[invariant c : num]
 inc = function () -> num {
   c = _plus(c, 1);
   _minus(c, 1);

@@ -3,9 +3,12 @@
 
 extern val _plus : (num, num) -> num
 extern val _minus : (num, num) -> num
+extern val _mult : (num, num) -> num
 extern val _eek : (str, str) -> bool
 extern val _typeof : (any) -> str
 extern val _not : (bool) -> bool
+extern val _le : (num, num) -> bool
 var succ; succ = function (x: num) -> num {
   return _plus(1, x);
 };
+_plus(succ(1), succ(2));

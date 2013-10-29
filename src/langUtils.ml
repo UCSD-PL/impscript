@@ -33,6 +33,14 @@ let tBool   = TBase TBool
 let tUndef  = TBase TUndef
 let tNull   = TBase TNull
 
+let tUnion ts =
+  let l = List.flatten (List.map (function TUnion(l) -> l | t -> [t]) ts) in
+  TUnion (Utils.removeDupes l)
+
+let ptArrow h tArgs tRet =
+  if Heap.is_empty h then Typ (TArrow (tArgs, tRet))
+  else OpenArrow (h, tArgs, tRet)
+
 let rec mapExp fE fS {exp=e} = {exp = mapExp_ fE fS e}
 
 and mapStmt fE fS {stmt=s} = {stmt = mapStmt_ fE fS s}
@@ -54,6 +62,7 @@ and mapStmt_ fE fS = function
   | SIf(e,s1,s2) -> fS (SIf (mapExp fE fS e, mapStmt fE fS s1, mapStmt fE fS s2))
   | SWhile(e,s) -> fS (SWhile (mapExp fE fS e, mapStmt fE fS s))
   | SVarInvariant(x,t,s) -> fS (SVarInvariant (x, t, mapStmt fE fS s))
+  | SClose(xs,s) -> fS (SClose (xs, mapStmt fE fS s))
   | SLoadedSrc(f,s) -> fS (SLoadedSrc (f, mapStmt fE fS s))
   | SExternVal(x,t,s) -> fS (SExternVal (x, t, mapStmt fE fS s))
 

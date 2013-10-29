@@ -42,10 +42,13 @@ rule token = parse
   | "undefined"    { UNDEF }
   | "extern"       { EXTERN }
   | "invariant"    { INVARIANT }
+  | "close"        { CLOSE }
   | "("            { LPAREN }
   | ")"            { RPAREN }
   | "{"            { LBRACE }
   | "}"            { RBRACE }
+  | "["            { LBRACK }
+  | "]"            { RBRACK }
   (* (* | "." { DOT } *) (* NOTE: won't work with dots in idents *) *)
   | ","            { COMMA }
   | ";"            { SEMI }

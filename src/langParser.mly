@@ -12,6 +12,7 @@ type parse_stmt = (* TODO attach line info *)
   | PSIf of exp * block * block 
   | PSWhile of exp * block
   | PSVarInvariant of var * typ
+  | PSClose of var list
   | PSExternVal of var * typ
 
 and block = parse_stmt list
@@ -24,6 +25,8 @@ let rec stmtOfBlock : block -> stmt = function
       wrapStmt (SVarInvariant (x, t, stmtOfBlock l))
   | PSExternVal(x,t)::l ->
       wrapStmt (SExternVal (x, t, stmtOfBlock l))
+  | PSClose(xs)::l ->
+      wrapStmt (SClose (xs, stmtOfBlock l))
 
   (* ... and use sequences for the rest *)
   | [] -> sSkip
@@ -47,9 +50,9 @@ let rec stmtOfBlock : block -> stmt = function
 (* %token <string> TVAR *)
 %token
   EOF NULL UNDEF
-  IF ELSE COMMA COLON LBRACE RBRACE SEMI LPAREN RPAREN
+  IF ELSE COMMA COLON LBRACE RBRACE SEMI LPAREN RPAREN LBRACK RBRACK
   PIPE FUN RET LETREF EQ EQARROW AS ARROW
-  EXTERN VAL INVARIANT
+  EXTERN VAL INVARIANT CLOSE
   TANY TBOT
 
 %type <Lang.stmt> program
@@ -69,7 +72,9 @@ parse_stmt :
  | IF LPAREN e=exp RPAREN LBRACE s1=block RBRACE
    ELSE LBRACE s2=block RBRACE  { PSIf (e,s1,s2) }
  | EXTERN VAL x=VAR COLON t=typ { PSExternVal (x,t) }
- | INVARIANT x=VAR COLON t=typ  { PSVarInvariant (x,t) }
+ | LBRACK INVARIANT x=VAR COLON t=typ RBRACK { PSVarInvariant (x,t) }
+ | LBRACK CLOSE LBRACE xs=separated_list(COMMA,VAR) RBRACE RBRACK
+    { PSClose xs }
 
 base_val :
  | b=VBOOL { VBool b }
@@ -83,11 +88,11 @@ exp_ :
  | v=base_val                          { EBase v }
  | x=VAR                               { EVarRead x }
  | LPAREN s=typ EQARROW t=typ RPAREN   { ECast (s, t) }
- | e=exp AS t=typ                      { EAs (e, t) }
+ | e=exp AS t=typ                      { EAs (e, Typ t) }
 
  | e=exp LPAREN es=separated_list(COMMA,exp) RPAREN { EApp (e, es) }
 
- | FUN LPAREN xts=separated_list(COMMA,formal) RPAREN
+ | FUN LPAREN xts=separated_list(COMMA,maybe_annotated_formal) RPAREN
      tRetOpt=option(func_ret_type)
      LBRACE b=block RBRACE
        { let (xs,tArgOpts) = List.split xts in
@@ -96,11 +101,22 @@ exp_ :
            | Some(tRet) ->
                let tArgs =
                  List.map (function None -> TAny | Some(t) -> t) tArgOpts in
-               EAs (eFun xs (stmtOfBlock b), TArrow (tArgs, tRet)) }
+               EAs (eFun xs (stmtOfBlock b), ptArrow Heap.empty tArgs tRet) }
 
-formal :
+ | FUN LBRACE h=separated_list(COMMA,annotated_formal) RBRACE
+   LPAREN xts=separated_list(COMMA,annotated_formal) RPAREN
+   tRet=func_ret_type LBRACE b=block RBRACE
+     { let (xs,tArgs) = List.split xts in
+       let h =
+         List.fold_left (fun acc (x,t) -> Heap.add (x,t) acc) Heap.empty h in
+       EAs (eFun xs (stmtOfBlock b), ptArrow h tArgs tRet) }
+
+maybe_annotated_formal :
  | x=VAR COLON t=typ { (x, Some t) }
  | x=VAR             { (x, None) }
+
+annotated_formal :
+ | x=VAR COLON t=typ { (x, t) }
 
 func_ret_type :
  | ARROW t=typ { t }
@@ -111,10 +127,8 @@ typ :
  | TBOT    { TBot }
  | UNDEF   { tUndef }
  | LPAREN ts=separated_list(COMMA,typ) RPAREN ARROW s=typ { TArrow (ts, s) }
- | LPAREN s=typ PIPE t=typ RPAREN { TUnion [s;t] }
+ | LPAREN s=typ PIPE ts=separated_list(PIPE,typ) RPAREN { tUnion (s::ts) }
      (* conflicts for union types without parens... *)
-     (* | s=typ PIPE t=typ { TUnion [s;t] } *)
-     (* | LPAREN ts=separated_list(PIPE,typ) RPAREN { TUnion ts } *)
 
 exp : e=exp_ { wrapExp e } (* TODO attach line info here... *)
 

@@ -51,6 +51,7 @@ and dsExp_ (env:env) = function
   | E.IdExpr (p, x) -> failwith "ds_ id"
   | E.ObjectExpr (_, fes) -> failwith "ds_ object"
   | E.ArrayExpr (_, es) -> failwith "ds_ array"
+  | E.NewExpr _ -> failwith "dsExp New"
   | E.ThisExpr p -> failwith "ds_ this"
 
   (**  e1[e2]  ****************************************************************)
@@ -115,7 +116,8 @@ and dsStmt_ env e = match e with
   | E.PrefixExpr _
   | E.InfixExpr _
   | E.AppExpr _
-  | E.FuncExpr _ -> SExp (dsExp env e)
+  | E.FuncExpr _
+  | E.NewExpr _ -> SExp (dsExp env e)
 
   (**  e1 = e2  ***************************************************************)
   | E.AssignExpr (_, E.VarLValue (_, x), e) -> SVarAssign (x, dsExp env e)
@@ -147,7 +149,28 @@ and dsStmt_ env e = match e with
   (**  break @return e  *******************************************************)
   | E.BreakExpr (_, "%return", e) -> SReturn (dsExp env e)
 
-  | _ -> failwith "dsStmt match failure"
+  (**  @break { while (test) { @continue { body } } }  ************************)
+  | E.LabelledExpr (_, "%break",
+        E.WhileExpr (_, test, E.LabelledExpr (_, "%continue", body))) ->
+      SWhile (dsExp env test, dsStmt env body)
+
+  (**  @break { while (test) { @continue { body }; incr } }  ******************)
+  | E.LabelledExpr (_, "%break",
+        E.WhileExpr (_, test, E.SeqExpr (_,
+            E.LabelledExpr(_, "%continue", body), incr))) ->
+      SWhile (dsExp env test, sSeq [dsStmt env body; dsStmt env incr])
+
+  | E.BreakExpr (_, bl, e) -> failwith (spr "break %s" bl)
+  | E.WhileExpr _ -> failwith "dsStmt while"
+  | E.DoWhileExpr _ -> failwith "dsStmt dowhole"
+  | E.LabelledExpr (_, l, e) -> failwith (spr "dsStmt label [%s]" l)
+  | E.ForInExpr _ -> failwith "dsStmt forin"
+  | E.VarDeclExpr _ -> failwith "dsStmt vardecl"
+  | E.TryCatchExpr _ -> failwith "dsStmt try"
+  | E.TryFinallyExpr _ -> failwith "dsStmt try"
+  | E.ThrowExpr _ -> failwith "dsStmt throw"
+  | E.FuncStmtExpr _ -> failwith "dsStmt func"
+  | E.HintExpr _ -> failwith "dsStmt hint"
 
 and dsVarDecl env x xInit s =
   let s = dsStmt (addVar x env) s in

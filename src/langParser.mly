@@ -51,7 +51,7 @@ let rec stmtOfBlock : block -> stmt = function
 %token
   EOF NULL UNDEF
   IF ELSE COMMA COLON LBRACE RBRACE SEMI LPAREN RPAREN LBRACK RBRACK
-  PIPE FUN RET LETREF EQ EQARROW AS ARROW
+  PIPE FUN RET LETREF EQ EQARROW AS ARROW WHILE
   EXTERN VAL INVARIANT CLOSE
   TANY TBOT
 
@@ -71,6 +71,7 @@ parse_stmt :
  | RET e=exp SEMI       { PSReturn e }
  | IF LPAREN e=exp RPAREN LBRACE s1=block RBRACE
    ELSE LBRACE s2=block RBRACE  { PSIf (e,s1,s2) }
+ | WHILE LPAREN e=exp RPAREN LBRACE s=block RBRACE { PSWhile(e,s) } 
  | EXTERN VAL x=VAR COLON t=typ { PSExternVal (x,t) }
  | LBRACK INVARIANT x=VAR COLON t=typ RBRACK { PSVarInvariant (x,t) }
  | LBRACK CLOSE LBRACE xs=separated_list(COMMA,VAR) RBRACE RBRACK

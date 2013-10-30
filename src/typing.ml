@@ -358,7 +358,22 @@ and _tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
                  let out = List.fold_left combineOut out1 [out2; out3] in
                  Ok (sIf e1 s2 s3, (Typ tJoin, hJoin, out)))))
 
-  | SWhile _ -> failwith "tc while"
+  | SWhile(e,s) ->
+      run tcCoerce (typeEnv, heapEnv, e, tBool)
+        (fun e -> Err (sWhile e s))
+        (fun e (heapEnv1,out1) ->
+           let cmp x y = compare x y = 0 in
+           if not (VarMap.equal cmp heapEnv heapEnv1)
+           then Err (sWhile e (sTcErr "heapEnv1 != heapEnv" s))
+           else
+             run tcStmt (typeEnv, heapEnv1, s)
+               (fun s -> Err (sWhile e s))
+               (fun s (_,heapEnv2,out2) ->
+                  if not (VarMap.equal cmp heapEnv heapEnv2)
+                  then Err (sWhile e (sSeq [s; sExp
+                              (eTcErr "heapEnv2 != heapEnv" (eStr ""))]))
+                  else let out = combineOut out1 out2 in
+                       Ok (sWhile e s, (Typ tUndef, heapEnv, out))))
 
   | SVarInvariant(x,tGoalX,s) ->
       (match lookupHeap x heapEnv with

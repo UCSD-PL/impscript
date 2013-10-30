@@ -35,7 +35,8 @@ rule token = parse
   | "as"           { AS }
   | "->"           { ARROW }
   | "function"     { FUN }
-  | "return "      { RET }
+  | "return"       { RET }
+  | "while"        { WHILE }
   | "if"           { IF }
   | "else"         { ELSE }
   | "null"         { NULL }

@@ -90,7 +90,10 @@ and strStmt k stmt = match stmt.stmt with
       ^ spr "%s} else {\n" (tab k)
       ^ spr "%s%s\n"       (tab (succ k)) (strStmt (succ k) s2)
       ^ spr "%s}"          (tab k)
-  | SWhile _ -> failwith "can't print"
+  | SWhile(e,s) ->
+        spr "while (%s) {\n" (strExp k e)
+      ^ spr "%s%s\n"         (tab (succ k)) (strStmt (succ k) s)
+      ^ spr "%s}"            (tab k)
   | SVarInvariant(x,t,s) ->
       spr "[invariant %s : %s]\n%s%s" x (strTyp t) (tab k) (strStmt k s)
   | SClose(xs,s) ->

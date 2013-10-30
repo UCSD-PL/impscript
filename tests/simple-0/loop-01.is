@@ -1,4 +1,6 @@
-(* extern val _plus : ((num | str), (num | str)) -> (num | str) *)
+
+(*** ../prims/prims.is ***)
+
 extern val _plus : (num, num) -> num
 extern val _minus : (num, num) -> num
 extern val _mult : (num, num) -> num
@@ -7,3 +9,12 @@ extern val _typeof : (any) -> str
 extern val _not : (bool) -> bool
 extern val _lt : (num, num) -> bool
 extern val _le : (num, num) -> bool
+
+(*** ../tests/simple-0/loop-01.js ***)
+
+var sum; sum = 0;
+var i; i = 0;
+while (_lt(i, 10)) {
+  sum = _plus(sum, i);
+  i = _plus(i, 1);
+}

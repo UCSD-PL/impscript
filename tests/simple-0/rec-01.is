@@ -15,3 +15,5 @@ var fact; fact = function {fact: (num) -> num} (n: num) -> num {
     return _mult(n, fact(_minus(n, 1)));
   }
 };
+[close {fact}]
+fact(2);

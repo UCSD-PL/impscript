@@ -427,8 +427,5 @@ and tcCoerce (typeEnv, heapEnv, e, tGoal) =
 
 let typecheck prog =
   match tcStmt (VarMap.empty, VarMap.empty, prog) with
-   | Ok(prog,(_,_,_)) -> prog
-   | Err(prog) -> begin
-       Printer.printStmt prog "out/error.is";
-       Log.printTcErr ();
-     end
+   | Ok(prog,(_,_,_)) -> Ok (prog, ())
+   | Err(prog)        -> Err prog

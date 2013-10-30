@@ -130,20 +130,28 @@ let rec addPrelude prelude prog =
 
 (***** Main *******************************************************************)
 
-let tcCheckCasts prog =
+let tcCheckCasts prog f =
   Settings.castInsertionMode := false;
-  ignore (Typing.typecheck prog);
-  Log.log1 "\n%s\n" (Utils.greenString "TC: OK");
-  () 
+  match Typing.typecheck prog with
+   | Typing.Ok _ -> Log.log1 "\n%s\n" (Utils.greenString "TC: OK")
+   | Typing.Err(prog) -> begin
+       Log.log1 "\n%s " (Utils.redString "TC: FAILED!");
+       Printer.printStmt prog (spr "%s.error" f);
+     end
 
 let tcInsertCasts prog f =
   Settings.castInsertionMode := true;
-  let prog = Typing.typecheck prog in
-  Log.log1 "\n%s\n" (Utils.greenString "TC + CASTS: OK");
-  Printer.printStmt prog f;
-  (* sanity check that the inserted casts are sufficient for typing *)
-  tcCheckCasts prog;
-  ()
+  match Typing.typecheck prog with
+   | Typing.Ok(prog,()) -> begin
+       Log.log1 "\n%s\n" (Utils.greenString "TC + CASTS: OK");
+       Printer.printStmt prog f;
+       (* sanity check that the inserted casts are sufficient for typing *)
+       tcCheckCasts prog f;
+     end
+   | Typing.Err(prog) -> begin
+       Log.log1 "\n%s " (Utils.redString "TC + CASTS: FAILED!");
+       Printer.printStmt prog f;
+     end
 
 let parseAndProcessFile f = function
   | JavaScript(fPrefix) -> begin
@@ -157,9 +165,9 @@ let parseAndProcessFile f = function
   | ImpScriptInsertCasts(fPrefix,n) -> 
       let prog = doParseImpScript f in
       tcInsertCasts prog (spr "%s.%d.is" fPrefix (succ n))
-  | ImpScriptCheckCasts(fPrefix) ->
+  | ImpScriptCheckCasts _ ->
       let prog = doParseImpScript f in
-      tcCheckCasts prog
+      tcCheckCasts prog f
 
 let _ =
   Arg.parse argSpecs anonArgFun usage;

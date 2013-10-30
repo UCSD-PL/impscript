@@ -2,5 +2,6 @@ out/
 _build/
 impscript
 tests/*/*.[0-9].is
+tests/*/*.is.error
 /*/*.swp
 /*/*/*.swp

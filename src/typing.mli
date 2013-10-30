@@ -28,5 +28,5 @@ val tcStmt    : (type_env * heap_env * stmt)
 val tcCoerce  : (type_env * heap_env * exp * typ)
                   -> (exp, heap_env * more_outputs) result
 
-val typecheck : stmt -> stmt
+val typecheck : stmt -> (stmt, unit) result
 

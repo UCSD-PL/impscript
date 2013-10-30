@@ -65,10 +65,8 @@ let printErr cap s =
   terminate ()
 
 let printParseErr s = printErr "PARSE ERROR!" s
-(*
 
-let printTcErr  l = printErr "TC ERROR!" (String.concat "\n" l)
-*)
+let printTcErr () = printErr "TC: ERROR!" ""
 
 (*******************************************************************************)
 

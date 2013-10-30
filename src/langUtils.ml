@@ -9,11 +9,14 @@ let eVar x         = wrapExp (EVarRead x)
 let eApp e es      = wrapExp (EApp (e, es))
 let eAs e t        = wrapExp (EAs (e, t))
 let eCast s t      = wrapExp (ECast (s, t))
+let eTcErr s e     = wrapExp (ETcErr (s, e))
 
 let wrapStmt s     = { stmt = s }
 let sRet e         = wrapStmt (SReturn e)
 let sLetRef x s    = wrapStmt (SVarDecl (x, s))
 let sAssign x e    = wrapStmt (SVarAssign (x, e))
+let sInvar x t s   = wrapStmt (SVarInvariant (x, t, s))
+let sClose xs s    = wrapStmt (SClose (xs, s))
 let sIf e s1 s2    = wrapStmt (SIf (e, s1, s2))
 let sWhile e s     = wrapStmt (SWhile (e, s))
 let sLoaded f s    = wrapStmt (SLoadedSrc (f, s))
@@ -52,6 +55,7 @@ and mapExp_ fE fS = function
   | EApp(e,es) -> fE (EApp (mapExp fE fS e, List.map (mapExp fE fS) es))
   | EAs(e,t) -> fE (EAs (mapExp fE fS e, t))
   | ECast(s,t) -> fE (ECast (s, t))
+  | ETcErr(s,e) -> fE (ETcErr (s, mapExp fE fS e))
 
 and mapStmt_ fE fS = function
   | SExp(e) -> fS (SExp (mapExp fE fS e))

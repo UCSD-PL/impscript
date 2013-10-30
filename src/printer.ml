@@ -59,6 +59,7 @@ let rec strExp k exp = match exp.exp with
       else strFunAs k xs body h tArgs tRet
   | EAs(e,pt) -> strEAs k e pt
   | ECast(s,t) -> spr "(%s => %s)" (strTyp s) (strTyp t)
+  | ETcErr(s,e) -> spr "[[[ %s !!! TC ERROR !!! %s ]]]" (strExp k e) s
 
 and strFunAs k xs body h tArgs tRet =
   let sHeap = if Heap.is_empty h then "" else spr "%s " (strHeap h) in
@@ -123,3 +124,4 @@ let rec strExpAst exp = match exp.exp with
   | EApp _ -> "EApp(...)"
   | EAs(e,_) -> spr "EAs(%s,_)" (strExpAst e)
   | ECast _ -> "ECast(...)"
+  | ETcErr _ -> "ETcErr(...)"

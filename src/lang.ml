@@ -38,6 +38,7 @@ type exp_ =
   | EApp of exp * exp list
   | EAs of exp * pre_typ
   | ECast of typ * typ
+  | ETcErr of string * exp
 
 and stmt_ =
   | SExp of exp

@@ -15,15 +15,15 @@ let rec strTyp = function
   | TUnion(ts) ->
       spr "(%s)" (String.concat " | " (List.map strTyp ts))
 
-let strHeap h =
-  let h = Heap.elements h in
+let strRelySet h =
+  let h = RelySet.elements h in
   let l = List.map (fun (x,t) -> spr "%s: %s" x (strTyp t)) h in
   spr "{%s}" (String.concat ", " l)
 
 let strPreTyp = function
   | Typ(t) -> strTyp t
-  | OpenArrow(h,tArgs,tRet) ->
-      spr "%s => %s" (strHeap h) (strTyp (TArrow (tArgs, tRet)))
+  | OpenArrow(r,tArgs,tRet) ->
+      spr "%s => %s" (strRelySet r) (strTyp (TArrow (tArgs, tRet)))
 
 let tab k = String.make (2 * k) ' '
 
@@ -53,16 +53,16 @@ let rec strExp k exp = match exp.exp with
       (tab k)
   | EAs({exp=EFun(xs,body)},(Typ(TArrow(tArgs,tRet)) as tArrow)) ->
       if List.length xs <> List.length tArgs then strEAs k exp tArrow
-      else strFunAs k xs body Heap.empty tArgs tRet
-  | EAs({exp=EFun(xs,body)},(OpenArrow(h,tArgs,tRet) as tArrow)) ->
+      else strFunAs k xs body RelySet.empty tArgs tRet
+  | EAs({exp=EFun(xs,body)},(OpenArrow(r,tArgs,tRet) as tArrow)) ->
       if List.length xs <> List.length tArgs then strEAs k exp tArrow
-      else strFunAs k xs body h tArgs tRet
+      else strFunAs k xs body r tArgs tRet
   | EAs(e,pt) -> strEAs k e pt
   | ECast(s,t) -> spr "(%s => %s)" (strTyp s) (strTyp t)
   | ETcErr(s,e) -> spr "[[[ %s !!! TC ERROR !!! %s ]]]" (strExp k e) s
 
 and strFunAs k xs body h tArgs tRet =
-  let sHeap = if Heap.is_empty h then "" else spr "%s " (strHeap h) in
+  let sHeap = if RelySet.is_empty h then "" else spr "%s " (strRelySet h) in
   let sRet  = strTyp tRet in
   let sArgs = List.map (fun (x,t) -> spr "%s: %s" x (strTyp t))
                 (List.combine xs tArgs) in

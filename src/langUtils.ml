@@ -40,9 +40,9 @@ let tUnion ts =
   let l = List.flatten (List.map (function TUnion(l) -> l | t -> [t]) ts) in
   TUnion (Utils.removeDupes l)
 
-let ptArrow h tArgs tRet =
-  if Heap.is_empty h then Typ (TArrow (tArgs, tRet))
-  else OpenArrow (h, tArgs, tRet)
+let ptArrow r tArgs tRet =
+  if RelySet.is_empty r then Typ (TArrow (tArgs, tRet))
+  else OpenArrow (r, tArgs, tRet)
 
 let rec mapExp fE fS {exp=e} = {exp = mapExp_ fE fS e}
 

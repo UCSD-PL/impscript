@@ -102,14 +102,15 @@ exp_ :
            | Some(tRet) ->
                let tArgs =
                  List.map (function None -> TAny | Some(t) -> t) tArgOpts in
-               EAs (eFun xs (stmtOfBlock b), ptArrow Heap.empty tArgs tRet) }
+               EAs (eFun xs (stmtOfBlock b), ptArrow RelySet.empty tArgs tRet) }
 
- | FUN LBRACE h=separated_list(COMMA,annotated_formal) RBRACE
+ | FUN LBRACE r=separated_list(COMMA,annotated_formal) RBRACE
    LPAREN xts=separated_list(COMMA,annotated_formal) RPAREN
    tRet=func_ret_type LBRACE b=block RBRACE
      { let (xs,tArgs) = List.split xts in
        let h =
-         List.fold_left (fun acc (x,t) -> Heap.add (x,t) acc) Heap.empty h in
+         List.fold_left
+           (fun acc (x,t) -> RelySet.add (x,t) acc) RelySet.empty r in
        EAs (eFun xs (stmtOfBlock b), ptArrow h tArgs tRet) }
 
 maybe_annotated_formal :

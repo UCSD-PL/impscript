@@ -16,13 +16,14 @@ type typ =
   | TAny
   | TBot
 
-module Heap = Set.Make (struct type t = (var * typ) let compare = compare end)
+module RelySet =
+  Set.Make (struct type t = (var * typ) let compare = compare end)
 
-type heap = Heap.t
+type rely = RelySet.t
 
 type pre_typ =
   | Typ of typ
-  | OpenArrow of heap * typ list * typ
+  | OpenArrow of rely * typ list * typ
 
 type base_val =
   | VNum of float

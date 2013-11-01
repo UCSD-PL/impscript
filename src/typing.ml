@@ -131,10 +131,10 @@ let rec tcExp (typeEnv, heapEnv, exp) = match exp.exp with
       tcBareFun typeEnv heapEnv xs body
 
   | EAs({exp=EFun(xs,body)},Typ(TArrow(tArgs,tRet))) ->
-      tcAnnotatedFun typeEnv heapEnv xs body Heap.empty tArgs tRet
+      tcAnnotatedFun typeEnv heapEnv xs body RelySet.empty tArgs tRet
 
-  | EAs({exp=EFun(xs,body)},OpenArrow(h,tArgs,tRet)) ->
-      tcAnnotatedFun typeEnv heapEnv xs body h tArgs tRet
+  | EAs({exp=EFun(xs,body)},OpenArrow(r,tArgs,tRet)) ->
+      tcAnnotatedFun typeEnv heapEnv xs body r tArgs tRet
 
   (* discard casts inserted in previous phase when compiling in this phase *)
   | EApp({exp=ECast(s,t)},eArgs) when !Settings.castInsertionMode ->
@@ -180,14 +180,14 @@ and tcBareFun typeEnv heapEnv xs body =
   (* eagerly add all strong assignables to function's input heap env.
      then after type checking the function, synthesize an open arrow
      with all of these variables that were used at least once. *)
-  let (heap,heapEnvFun) =
+  let (rely,heapEnvFun) =
     VarMap.fold (fun x pt (acc1,acc2) ->
       match pt with
-        | Typ(t) -> (Heap.add (x,t) acc1, VarMap.add x (Typ t) acc2)
+        | Typ(t) -> (RelySet.add (x,t) acc1, VarMap.add x (Typ t) acc2)
         | OpenArrow(_,tArgs,tRet) ->
             let tArrow = TArrow (tArgs, tRet) in
-            (Heap.add (x,tArrow) acc1, VarMap.add x (Typ tArrow) acc2)
-    ) heapEnv (Heap.empty, heapEnvFun) in
+            (RelySet.add (x,tArrow) acc1, VarMap.add x (Typ tArrow) acc2)
+    ) heapEnv (RelySet.empty, heapEnvFun) in
 
   run tcStmt (typeEnv, heapEnvFun, body)
     (fun body -> Err (eFun xs body))
@@ -198,12 +198,13 @@ and tcBareFun typeEnv heapEnv xs body =
         | Typ(tBody) ->
             let tArgs = List.map (fun _ -> TAny) xs in
             let tRet = joinTypes (Types.add tBody out.retTypes) in
-            let heap = Heap.filter (fun (x,_) -> Vars.mem x out.usedVars) heap in
-            let arrow = ptArrow heap tArgs tRet in
+            let rely =
+              RelySet.filter (fun (x,_) -> Vars.mem x out.usedVars) rely in
+            let arrow = ptArrow rely tArgs tRet in
             let out = { out with retTypes = Types.empty } in
             Ok (eAs (eFun xs body) arrow, (arrow, heapEnv, out)))
 
-and tcAnnotatedFun typeEnv heapEnv xs body heap tArgs tRet =
+and tcAnnotatedFun typeEnv heapEnv xs body rely tArgs tRet =
   if List.length xs <> List.length tArgs
     then failwith "add handling for len(actuals) != len(formals)";
   let typeEnv = VarMap.add "@ret" (InvariantRef TAny) typeEnv in
@@ -212,8 +213,8 @@ and tcAnnotatedFun typeEnv heapEnv xs body heap tArgs tRet =
       (VarMap.add x StrongRef acc1, VarMap.add x (Typ t) acc2)
     ) (typeEnv, VarMap.empty) (List.combine xs tArgs) in
   let typeEnv =
-    Heap.fold
-      (fun (x,t) acc -> VarMap.add x (InvariantRef t) acc) heap typeEnv in
+    RelySet.fold
+      (fun (x,t) acc -> VarMap.add x (InvariantRef t) acc) rely typeEnv in
   run tcStmt (typeEnv, heapEnvFun, body)
     (fun body -> Err (eFun xs body))
     (fun body (ptBody,_,_) ->
@@ -221,7 +222,7 @@ and tcAnnotatedFun typeEnv heapEnv xs body heap tArgs tRet =
         | OpenArrow _ ->
             Err (eFun xs (sTcErr "function body has an open type" body))
         | Typ(tBody) ->
-            let arrow = ptArrow heap tArgs tRet in
+            let arrow = ptArrow rely tArgs tRet in
             if sub (tBody, tRet) then
               Ok (eAs (eFun xs body) arrow, (arrow, heapEnv, emptyOut))
             else
@@ -397,20 +398,20 @@ and _tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
           match lookupType x typeEnv with
            | Some(StrongRef) ->
                (match lookupHeap x heapEnv with
-                 | Some(OpenArrow(h,tArgs,tRet)) ->
-                     let accR = Heap.union accR h in
-                     let accG = Heap.add (x, TArrow (tArgs, tRet)) accG in
+                 | Some(OpenArrow(r,tArgs,tRet)) ->
+                     let accR = RelySet.union accR r in
+                     let accG = RelySet.add (x, TArrow (tArgs, tRet)) accG in
                      (accR, accG)
                  | Some(Typ _) -> failwith (spr "[%s] is not open func" x)
                  | None -> failwith "sclose 1")
            | _ -> failwith "sclose 2"
-        ) (Heap.empty, Heap.empty) xs
+        ) (RelySet.empty, RelySet.empty) xs
       in
-      if not (Heap.equal rely guarantee) then
+      if not (RelySet.equal rely guarantee) then
         Err (sClose xs (sTcErr "Rely != Guarantee" s))
       else
         let (typeEnv,heapEnv) =
-          Heap.fold (fun (x,t) (acc1,acc2) ->
+          RelySet.fold (fun (x,t) (acc1,acc2) ->
             (VarMap.add x (Val t) acc1, VarMap.remove x acc2)
           ) rely (typeEnv, heapEnv)
         in

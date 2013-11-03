@@ -1,7 +1,9 @@
 
 open Lang
 
-type more_outputs = { retTypes: Types.t; usedVars: Vars.t }
+module TypeEnv : sig type t end
+module HeapEnv : sig type t end
+module MoreOut : sig type t end
 
 type ('a, 'b) result =
   | Ok of 'a * 'b
@@ -19,14 +21,14 @@ val join      : typ -> typ -> typ
 
 val coerce    : (exp * typ * typ) -> (exp, unit) result
 
-val tcExp     : (type_env * heap_env * exp)
-                  -> (exp, pre_typ * heap_env * more_outputs) result
+val tcExp     : (TypeEnv.t * HeapEnv.t * exp)
+                  -> (exp, pre_type * HeapEnv.t * MoreOut.t) result
 
-val tcStmt    : (type_env * heap_env * stmt)
-                  -> (stmt, pre_typ * heap_env * more_outputs) result
+val tcStmt    : (TypeEnv.t * HeapEnv.t * stmt)
+                  -> (stmt, pre_type * HeapEnv.t * MoreOut.t) result
 
-val tcCoerce  : (type_env * heap_env * exp * typ)
-                  -> (exp, heap_env * more_outputs) result
+val tcCoerce  : (TypeEnv.t * HeapEnv.t * exp * typ)
+                  -> (exp, HeapEnv.t * MoreOut.t) result
 
 val typecheck : stmt -> (stmt, unit) result
 

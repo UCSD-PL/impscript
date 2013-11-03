@@ -8,6 +8,7 @@ type parse_stmt = (* TODO attach line info *)
   | PSExp of exp
   | PSVarDecl of var
   | PSVarAssign of var * exp
+  | PSObjAssign of exp * exp * exp
   | PSReturn of exp
   | PSIf of exp * block * block 
   | PSWhile of exp * block
@@ -32,6 +33,7 @@ let rec stmtOfBlock : block -> stmt = function
   | [] -> sSkip
   | PSExp(e)::l -> sSeq [sExp e; stmtOfBlock l]
   | PSVarAssign(x,e)::l -> sSeq [sAssign x e; stmtOfBlock l]
+  | PSObjAssign(e1,e2,e3)::l -> sSeq [sSet e1 e2 e3; stmtOfBlock l]
   | PSReturn(e)::l -> sSeq [sRet e; stmtOfBlock l]
   | PSIf(e,s1,s2)::l ->
       let (s1,s2) = (stmtOfBlock s1, stmtOfBlock s2) in
@@ -51,7 +53,7 @@ let rec stmtOfBlock : block -> stmt = function
 %token
   EOF NULL UNDEF
   IF ELSE COMMA COLON LBRACE RBRACE SEMI LPAREN RPAREN LBRACK RBRACK
-  PIPE FUN RET LETREF EQ EQARROW AS ARROW WHILE
+  PIPE FUN RET LETREF EQ EQARROW AS ARROW WHILE DOT
   EXTERN VAL INVARIANT CLOSE
   TANY TBOT
 
@@ -69,6 +71,8 @@ parse_stmt :
  | LETREF x=VAR SEMI    { PSVarDecl x }
  | x=VAR EQ e=exp SEMI  { PSVarAssign(x,e) }
  | RET e=exp SEMI       { PSReturn e }
+ | e1=exp DOT f=VAR EQ e3=exp SEMI             { PSObjAssign (e1, eStr f, e3) }
+ | e1=exp LBRACK e2=exp RBRACK EQ e3=exp SEMI  { PSObjAssign (e1, e2, e3) }
  | IF LPAREN e=exp RPAREN LBRACE s1=block RBRACE
    ELSE LBRACE s2=block RBRACE  { PSIf (e,s1,s2) }
  | WHILE LPAREN e=exp RPAREN LBRACE s=block RBRACE { PSWhile(e,s) } 
@@ -92,6 +96,9 @@ exp_ :
  | e=exp AS t=typ                      { EAs (e, Typ t) }
 
  | e=exp LPAREN es=separated_list(COMMA,exp) RPAREN { EApp (e, es) }
+ | LBRACE l=separated_list(COMMA,field_exp) RBRACE  { EObj l }
+ | e=exp DOT f=VAR                                  { EObjRead (e, eStr f) }
+ | e1=exp LBRACK e2=exp RBRACK                      { EObjRead (e1, e2) }
 
  | FUN LPAREN xts=separated_list(COMMA,maybe_annotated_formal) RPAREN
      tRetOpt=option(func_ret_type)
@@ -131,6 +138,9 @@ typ :
  | LPAREN ts=separated_list(COMMA,typ) RPAREN ARROW s=typ { TArrow (ts, s) }
  | LPAREN s=typ PIPE ts=separated_list(PIPE,typ) RPAREN { tUnion (s::ts) }
      (* conflicts for union types without parens... *)
+
+field_exp :
+ | f=VAR EQ e=exp { (f, e) }
 
 exp : e=exp_ { wrapExp e } (* TODO attach line info here... *)
 

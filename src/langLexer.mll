@@ -4,7 +4,8 @@ open LangParser
 
 let letter  = ['A'-'Z''a'-'z''_']
 let digit   = ['0'-'9']
-let ident   = ['a'-'z''_''&'] (letter|digit|'''|'.')*
+let ident   = ['a'-'z''_''&'] (letter|digit|''')*
+(* let ident   = ['a'-'z''_''&'] (letter|digit|'''|'.')* *)
 (* let tyvar   = ['A'-'Z'] (letter|digit)* *)
 let tyvar   = ['''] (letter|digit)*
 let white   = [' ' '\t' '\r']
@@ -50,7 +51,7 @@ rule token = parse
   | "}"            { RBRACE }
   | "["            { LBRACK }
   | "]"            { RBRACK }
-  (* (* | "." { DOT } *) (* NOTE: won't work with dots in idents *) *)
+  | "."            { DOT } (* NOTE: won't work with dots in idents *)
   | ","            { COMMA }
   | ";"            { SEMI }
   | ":"            { COLON }

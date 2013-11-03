@@ -10,6 +10,8 @@ let eApp e es      = wrapExp (EApp (e, es))
 let eAs e t        = wrapExp (EAs (e, t))
 let eCast s t      = wrapExp (ECast (s, t))
 let eTcErr s e     = wrapExp (ETcErr (s, e))
+let eObj l         = wrapExp (EObj l)
+let eGet e1 e2     = wrapExp (EObjRead (e1, e2))
 
 let wrapStmt s     = { stmt = s }
 let sRet e         = wrapStmt (SReturn e)
@@ -21,6 +23,7 @@ let sIf e s1 s2    = wrapStmt (SIf (e, s1, s2))
 let sWhile e s     = wrapStmt (SWhile (e, s))
 let sLoaded f s    = wrapStmt (SLoadedSrc (f, s))
 let sExp e         = wrapStmt (SExp e)
+let sSet e1 e2 e3  = wrapStmt (SObjAssign (e1, e2, e3))
 let sSkip          = sExp (eUndef)
 
 let rec sSeq = function
@@ -44,6 +47,10 @@ let ptArrow r tArgs tRet =
   if RelySet.is_empty r then Typ (TArrow (tArgs, tRet))
   else OpenArrow (r, tArgs, tRet)
 
+let isStr = function
+  | {exp=EBase(VStr(s))} -> Some s
+  | _ -> None
+
 let rec mapExp fE fS {exp=e} = {exp = mapExp_ fE fS e}
 
 and mapStmt fE fS {stmt=s} = {stmt = mapStmt_ fE fS s}
@@ -56,6 +63,8 @@ and mapExp_ fE fS = function
   | EAs(e,t) -> fE (EAs (mapExp fE fS e, t))
   | ECast(s,t) -> fE (ECast (s, t))
   | ETcErr(s,e) -> fE (ETcErr (s, mapExp fE fS e))
+  | EObj(l) -> fE (EObj (List.map (fun (f,e) -> (f, mapExp fE fS e)) l))
+  | EObjRead(e1,e2) -> fE (EObjRead (mapExp fE fS e1, mapExp fE fS e2))
 
 and mapStmt_ fE fS = function
   | SExp(e) -> fS (SExp (mapExp fE fS e))
@@ -69,6 +78,8 @@ and mapStmt_ fE fS = function
   | SClose(xs,s) -> fS (SClose (xs, mapStmt fE fS s))
   | SLoadedSrc(f,s) -> fS (SLoadedSrc (f, mapStmt fE fS s))
   | SExternVal(x,t,s) -> fS (SExternVal (x, t, mapStmt fE fS s))
+  | SObjAssign(e1,e2,e3) ->
+      fS (SObjAssign (mapExp fE fS e1, mapExp fE fS e2, mapExp fE fS e3))
 
 (* [e; undefined] is inserted often by LamJS and ImpScript parsing *)
 let removeUndefs stmt =

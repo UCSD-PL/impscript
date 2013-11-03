@@ -46,16 +46,20 @@ and dsExp_ (env:env) = function
   | E.ConstExpr (_, c) -> dsConst c
 
   (**  x  *********************************************************************)
-  | E.VarExpr (p, x) -> (eVar x).exp
+  | E.VarExpr (p, x) -> EVarRead x
 
   | E.IdExpr (p, x) -> failwith "ds_ id"
-  | E.ObjectExpr (_, fes) -> failwith "ds_ object"
+
+  (**  { f1:e1, f2:e2, ... }  *************************************************)
+  | E.ObjectExpr (_, fes) ->
+      EObj (List.map (fun (_,f,e) -> (f, dsExp env e)) fes)
+
   | E.ArrayExpr (_, es) -> failwith "ds_ array"
   | E.NewExpr _ -> failwith "dsExp New"
   | E.ThisExpr p -> failwith "ds_ this"
 
   (**  e1[e2]  ****************************************************************)
-  | E.BracketExpr (_, e1, e2) -> failwith "ds_ bracket"
+  | E.BracketExpr (_, e1, e2) -> EObjRead (dsExp env e1, dsExp env e2)
 
   (**  op e  ******************************************************************)
   | E.PrefixExpr (_, "prefix:delete", E.BracketExpr (_, ed, ek)) ->
@@ -123,13 +127,15 @@ and dsStmt_ env e = match e with
   | E.AssignExpr (_, E.VarLValue (_, x), e) -> SVarAssign (x, dsExp env e)
 
   (**  e1[e2] = e3  ***********************************************************)
-  | E.AssignExpr (_, E.PropLValue (_, e1, e2), e3) -> failwith "ds_ assign"
+  | E.AssignExpr (_, E.PropLValue (_, e1, e2), e3) ->
+      SObjAssign (dsExp env e1, dsExp env e2, dsExp env e3)
 
   (**  let x = e1 in e2  ******************************************************)
   | E.LetExpr (_, x, e1, e2) -> failwith "ds_ let"
 
   (**  if (e1) { e2 } else { e3 } *********************************************)
-  | E.IfExpr (_, e1, e2, e3) -> SIf (dsExp env e1, dsStmt env e2, dsStmt env e3)
+  | E.IfExpr (_, e1, e2, e3) ->
+      SIf (dsExp env e1, dsStmt env e2, dsStmt env e3)
 
   (**  var x = e1; e2  ********************************************************)
   | E.SeqExpr (_, E.VarDeclExpr (_, x, e1), e2) ->

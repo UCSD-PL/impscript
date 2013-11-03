@@ -1,6 +1,10 @@
 
 open Lang
 
+let strLoc = function
+  | LConst(x) -> x
+  | LVar(x) -> x
+
 let rec strTyp = function
   | TBase(TInt) -> "int"
   | TBase(TNum) -> "num"
@@ -14,10 +18,24 @@ let rec strTyp = function
       spr "(%s) -> %s" (String.concat ", " (List.map strTyp ts)) (strTyp t)
   | TUnion(ts) ->
       spr "(%s)" (String.concat " | " (List.map strTyp ts))
+  | TRefMu(x,rt) -> spr "mu %s. %s" x (strRecdTyp rt)
+  | TRefLoc(l) -> spr "Ref(%s)" (strLoc l)
+  (* | TExists(x,t) -> spr "exists %s. %s" x (strTyp t) *)
+
+and strRecdTyp (TRecd(width,fields)) =
+  spr "{%s%s}"
+    (String.concat ", " (List.map strFieldType fields))
+    (match width, fields with
+       | ExactDomain, _    -> ""
+       | UnknownDomain, [] -> "..."
+       | UnknownDomain, _  -> ", ...")
+
+and strFieldType (f,t) = spr "%s: %s" f (strTyp t)
+
+let strBinding = strFieldType
 
 let strRelySet h =
-  let h = RelySet.elements h in
-  let l = List.map (fun (x,t) -> spr "%s: %s" x (strTyp t)) h in
+  let l = List.map strBinding (RelySet.elements h) in
   spr "{%s}" (String.concat ", " l)
 
 let strPreTyp = function
@@ -60,12 +78,18 @@ let rec strExp k exp = match exp.exp with
   | EAs(e,pt) -> strEAs k e pt
   | ECast(s,t) -> spr "(%s => %s)" (strTyp s) (strTyp t)
   | ETcErr(s,e) -> spr "[[[ %s !!! TC ERROR !!! %s ]]]" (strExp k e) s
+  | EObj(l) ->
+      spr "{%s}" (String.concat ", "
+        (List.map (fun (f, e) -> spr "%s = %s" f (strExp k e)) l))
+  | EObjRead(e1,e2) ->
+      (match LangUtils.isStr e2 with
+        | Some(f) -> spr "%s.%s" (strExp k e1) f
+        | None -> spr "%s[%s]" (strExp k e1) (strExp k e2))
 
 and strFunAs k xs body h tArgs tRet =
   let sHeap = if RelySet.is_empty h then "" else spr "%s " (strRelySet h) in
   let sRet  = strTyp tRet in
-  let sArgs = List.map (fun (x,t) -> spr "%s: %s" x (strTyp t))
-                (List.combine xs tArgs) in
+  let sArgs = List.map strBinding (List.combine xs tArgs) in
   let sArgs = String.concat ", " sArgs in
   spr "function %s(%s) -> %s {\n%s%s\n%s}" sHeap sArgs sRet
     (tab (succ k)) (clip (strStmt (succ k) body))
@@ -102,6 +126,10 @@ and strStmt k stmt = match stmt.stmt with
       spr "\n%s(*** %s ***)\n\n%s%s" (tab k) f (tab k) (strStmt k s)
   | SExternVal(x,t,s) ->
       spr "extern val %s : %s\n%s%s" x (strTyp t) (tab k) (strStmt k s)
+  | SObjAssign(e1,e2,e3) ->
+      (match LangUtils.isStr e2 with
+        | Some(f) -> spr "%s.%s = %s;" (strExp k e1) f (strExp k e3)
+        | None -> spr "%s[%s] = %s;" (strExp k e1) (strExp k e2) (strExp k e3))
 
 let printStmt s f =
   let oc = open_out f in

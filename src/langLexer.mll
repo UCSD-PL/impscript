@@ -26,6 +26,8 @@ rule token = parse
   | "str"        { TBASE Lang.TStr }
   | "any"        { TANY }
   | "bot"        { TBOT }
+  | "ref"        { REF }
+  | "mu"         { MU }
 
   | "true"         { VBOOL true }
   | "false"        { VBOOL false }
@@ -45,6 +47,9 @@ rule token = parse
   | "extern"       { EXTERN }
   | "invariant"    { INVARIANT }
   | "close"        { CLOSE }
+  | "fold"         { FOLD }
+  | "unfold"       { UNFOLD }
+  | "..."          { DOTS }
   | "("            { LPAREN }
   | ")"            { RPAREN }
   | "{"            { LBRACE }

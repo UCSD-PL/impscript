@@ -1,0 +1,5 @@
+var foo; foo = function () -> ref {...} {
+  var x; x = {a = 17};
+  x = fold({...}, x);
+  return x;
+};

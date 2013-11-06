@@ -1,6 +1,7 @@
 
 open Lang
 open LangUtils
+open Printer
 
 type type_env_binding =
   | Val of typ
@@ -34,9 +35,13 @@ module TypeEnv = struct
   fun x y typeEnv ->
     { typeEnv with bindings = VarMap.add x y typeEnv.bindings }
 
-  let addLocationVariable : var -> t -> t=
+  let addLocVar : var -> t -> t =
   fun x typeEnv ->
     { typeEnv with loc_vars = Vars.add x typeEnv.loc_vars }
+
+  let addLocVars : var list -> t -> t =
+  fun ls typeEnv ->
+    List.fold_left (fun acc l -> addLocVar l acc) typeEnv ls
 
 end
 
@@ -106,16 +111,30 @@ module MoreOut = struct
 end
 
 let projTyp = function
-  | OpenArrow _ -> failwith "projTyp"
   | Typ(t) -> t
+  | _ -> failwith "projTyp"
 
-let sub = function
+let rec sub = function
   | s, t when s = t -> true
   | TBot, _ -> true
   | _, TAny -> true
   | s, TUnion ts when List.mem s ts -> true
   (* TODO *)
   | _ -> false
+
+and recdSub (TRecd(width1,fts1), TRecd(width2,fts2)) =
+  let widthOkay =
+    match width1, width2 with
+      | UnknownDomain, ExactDomain -> false
+      | _, UnknownDomain ->
+          List.for_all (fun (f,_) -> List.mem_assoc f fts1) fts2
+      | ExactDomain, ExactDomain ->
+          List.for_all (fun (f,_) -> List.mem_assoc f fts1) fts2
+          && List.for_all (fun (f,_) -> List.mem_assoc f fts2) fts1
+  in
+  if widthOkay
+  then List.for_all (fun (f,t2) -> sub (List.assoc f fts1, t2)) fts2
+  else false
 
 let join s t = match s, t with
   | s, t when s = t -> s
@@ -130,6 +149,26 @@ let join s t = match s, t with
 let joinTypes : Types.t -> typ =
 fun ts ->
   Types.fold join ts TBot
+
+let rec stripExists : pre_type -> (var list * pre_type) =
+function
+  | Exists(l,pt) -> let (ls,pt0) = stripExists pt in (l::ls, pt0)
+  | pt           -> ([], pt)
+
+let rec addExists : var list -> pre_type -> pre_type =
+fun locs pt ->
+  match locs with
+    | []    -> pt
+    | l::ls -> Exists (l, addExists ls pt)
+
+let rec stripClosedType : pre_type -> (var list * typ) option =
+function
+  | OpenArrow _  -> None
+  | Typ(t)       -> Some ([], t)
+  | Exists(l,pt) ->
+      (match stripClosedType pt with
+         | Some(ls,t) -> Some (l::ls, t)
+         | None       -> None)
 
 let joinHeapEnvs : HeapEnv.t -> HeapEnv.t -> HeapEnv.t =
   let joinVars he1 he2 =
@@ -148,9 +187,9 @@ let joinHeapEnvs : HeapEnv.t -> HeapEnv.t -> HeapEnv.t =
     { HeapEnv.vars = joinVars he1.HeapEnv.vars he2.HeapEnv.vars;
       HeapEnv.locs = joinLocs he1.HeapEnv.locs he2.HeapEnv.locs; }
 
-let genLocVar ?(name="") =
+let genLocVar =
   let i = ref 0 in
-  fun () -> incr i; spr "L%s_%d" name !i
+  (fun ?(name="") () -> incr i; spr "L%s_%d" name !i)
 
 let isLambda exp = match exp.exp with
   | EFun _ | EAs({exp=EFun _},_) -> true
@@ -163,6 +202,7 @@ let maybeCloseSomeVars heapEnv stmt =
       | OpenArrow _, _  -> acc
       | Typ(t), None    -> Some (wrapStmt (SVarInvariant (x, t, stmt)))
       | Typ(t), Some(s) -> Some (wrapStmt (SVarInvariant (x, t, s)))
+      | Exists _, _     -> failwith "maybeCloseSomeVars"
   ) heapEnv.HeapEnv.vars None
 
 let extendRecdType : recd_type -> recd_type -> recd_type =
@@ -181,9 +221,24 @@ fun (TRecd(w1,l1)) (TRecd(w2,l2)) ->
   in
   TRecd (width, List.rev fields)
 
-let findInRecdType : field -> recd_type -> typ option =
-fun f (TRecd(_,rt)) ->
-  if List.mem_assoc f rt then Some (List.assoc f rt) else None
+type recd_get_field =
+  | Bound of typ
+  | NotBound
+  | MaybeBound
+
+let findInRecdType : field -> recd_type -> recd_get_field =
+fun f (TRecd(width,rt)) ->
+  if List.mem_assoc f rt then       Bound (List.assoc f rt)
+  else if width = ExactDomain then  NotBound
+  else                              MaybeBound
+
+let removeLocsFromType : typ -> typ =
+fun t ->
+  mapTyp (function TRefLoc _ -> TAny | s -> s) t
+
+(* TODO *)
+let unrollMu (x,rt) =
+  rt
 
 type ('a, 'b) result =
   | Ok of 'a * 'b
@@ -199,11 +254,13 @@ let sTcErr s stmt  = sSeq [sExp (eTcErr s (eStr "")); stmt]
 let errS s stmt    = Err (sTcErr s stmt)
 
 (* TODO *)
-let compatible s t =
-  true
+let compatible s t = match s, t with
+  | TRefLoc(l1), TRefLoc(l2) -> l1 = l2
+  | _, TRefLoc _ | TRefLoc _, _ -> false
+  | _ -> true
 
 let coerce (e, s, t) =
-  let (s1,s2) = (Printer.strTyp s, Printer.strTyp t) in
+  let (s1,s2) = (strTyp s, strTyp t) in
   if sub (s, t) then
     Ok (e, ())
   else if not !Settings.castInsertionMode then
@@ -245,32 +302,46 @@ let rec tcExp (typeEnv, heapEnv, exp) = match exp.exp with
   | EAs({exp=EFun(xs,body)},OpenArrow(r,tArgs,tRet)) ->
       tcAnnotatedFun typeEnv heapEnv xs body r tArgs tRet
 
-  (* discard casts inserted in previous phase when compiling in this phase *)
-  | EApp({exp=ECast(s,t)},eArgs) when !Settings.castInsertionMode ->
-      (match eArgs with
-        | [e1] ->
-            run tcExp (typeEnv, heapEnv, e1)
-              (fun e1 -> Err (eApp (eCast s t) [e1]))
-              (fun e1 stuff -> Ok (e1, stuff))
-        | _ ->
-            failwith "casts should only have one argument")
+  | EApp({exp=ECast((TRefMu("_",rt) as s),((TRefMu("_",rt')) as t))},[e])
+    when not !Settings.castInsertionMode ->
+      run tcExp (typeEnv, heapEnv, e)
+        (fun e -> Err (eApp (eCast s t) [e]))
+        (fun e (pt,heapEnv,out) ->
+           match pt with
+            | Typ(TRefLoc(l)) ->
+                (match HeapEnv.lookupLoc l heapEnv with
+                  | Some(rt0) when rt = rt0 ->
+                      let heapEnv = HeapEnv.addLoc l rt' heapEnv in
+                      Ok (eApp (eCast s t) [e], (Typ tUndef, heapEnv, out))
+                  | _ -> Err (eTcErr "app-cast error" (eApp (eCast s t) [e])))
+            | _ -> Err (eTcErr "app-cast error" (eApp (eCast s t) [e])))
 
-  | ECast(s,t) ->
-      if !Settings.castInsertionMode
-      then failwith "cast should've been caught above"
-      else Ok (exp, (Typ (TArrow ([s], t)), heapEnv, MoreOut.empty))
+  | EApp({exp=ECast((TRefMu(x,rt) as s),((TRefMu(x',rt')) as t))},[e])
+    when not !Settings.castInsertionMode ->
+      failwith "TODO cast between mu types"
+
+  | ECast(s,t) when not !Settings.castInsertionMode ->
+      Ok (exp, (Typ (TArrow ([s], t)), heapEnv, MoreOut.empty))
+
+  | ECast(s,t) (* when !Settings.castInsertionMode *) ->
+      failwith "cast should've been removed"
 
   | EApp(eFun,eArgs) ->
       run tcExp (typeEnv, heapEnv, eFun)
         (fun eFun -> Err (eApp eFun eArgs))
         (fun eFun (ptFun,heapEnv,outFun) ->
            match ptFun with
+            | Exists _ ->
+                Err (eApp (eTcErr "function has existential type" eFun) eArgs)
             | OpenArrow _ ->
                 Err (eApp (eTcErr "function has open type" eFun) eArgs)
             | Typ(TArrow(tArgs,tRet)) ->
                 tcApp1 typeEnv heapEnv outFun eFun eArgs tArgs tRet
             | Typ(tFun) ->
                 tcApp2 typeEnv heapEnv outFun eFun eArgs tFun)
+
+  | EObj(fes) ->
+      tcObjLit typeEnv heapEnv (genLocVar ()) fes
 
   | EObjRead(e1,e2) ->
       runTcExp2 (typeEnv, heapEnv) (e1, e2)
@@ -282,13 +353,54 @@ let rec tcExp (typeEnv, heapEnv, exp) = match exp.exp with
                   | None -> Err (eGet (eTcErr "not in heap" e1) e2)
                   | Some(rt) ->
                       (match findInRecdType f rt with
-                        | None -> Err (eTcErr "field not found" (eGet e1 e2))
-                        | Some(tf) -> Ok (eGet e1 e2, (Typ tf, heapEnv, out))))
+                        | Bound(tf) ->
+                            Ok (eGet e1 e2, (Typ tf, heapEnv, out))
+                        | NotBound ->
+                            if !Settings.strictObjGet
+                            then Err (eTcErr "field not found" (eGet e1 e2))
+                            else Ok (eGet e1 e2, (Typ tUndef, heapEnv, out))
+                        | MaybeBound ->
+                            if !Settings.strictObjGet
+                            then Err (eTcErr "field not found" (eGet e1 e2))
+                            else Ok (eGet e1 e2, (Typ TAny, heapEnv, out))))
             | _, None -> Err (eTcErr "dynamic key lookup" (eGet e1 e2))
-            | _, _ -> Err (eGet (eTcErr "bad type" e1) e2))
+            | _, _ -> Err (eGet (eTcErr (spr "object type isn't strong:\n %s"
+                                           (strPreTyp pt1)) e1) e2))
 
-  | EObj _ ->
-      failwith "tc EObj: should appear with var declaration"
+  | EFold(((x,rt) as mu),e) ->
+      run tcExp (typeEnv, heapEnv, e)
+        (fun e -> Err (eFold mu e))
+        (fun e (pt,heapEnv,out) ->
+           match pt with
+            | Typ(TRefLoc(l)) ->
+                (match HeapEnv.lookupLoc l heapEnv with
+                  | None -> Err (eFold mu (eTcErr "not in heap" e))
+                  | Some(rt') ->
+                      let rt = unrollMu mu in
+                      if recdSub (rt', rt) then
+                        let heapEnv = HeapEnv.removeLoc l heapEnv in
+                        Ok (eFold mu e, (Typ (TRefMu mu), heapEnv, out))
+                      else
+                        let (s1,s2) = (strRecdTyp rt', strRecdTyp rt) in
+                        let sErr = spr "bad recd subtyping\n %s\n %s\n" s1 s2 in
+                        Err (eFold mu (eTcErr sErr e)))
+            | _ -> Err (eFold mu (eTcErr "object isn't strong" e)))
+
+  | EUnfold(((x,rt) as mu),e) ->
+      run tcExp (typeEnv, heapEnv, e)
+        (fun e -> Err (eUnfold mu e))
+        (fun e (pt,heapEnv,out) ->
+           match pt with
+            | Typ(TRefMu(mu')) when mu <> mu' ->
+                Err (eTcErr "mu annotation doesn't match" (eUnfold mu e))
+            | Typ(TRefMu _ ) ->
+                let locObj = genLocVar () in
+                let rt = unrollMu mu in
+                let heapEnv = HeapEnv.addLoc (LVar locObj) rt heapEnv in
+                let ptr = Typ (TRefLoc (LVar locObj)) in
+                Ok (eUnfold mu e, (Exists (locObj, ptr), heapEnv, out))
+            | _ ->
+                Err (eUnfold mu (eTcErr "object isn't mu type" e)))
 
   | EAs(_,_) ->
       errE "non-function value in ascription" exp
@@ -310,6 +422,7 @@ and tcBareFun typeEnv heapEnv xs body =
   let (rely,heapEnvFun) =
     VarMap.fold (fun x pt (acc1,acc2) ->
       match pt with
+        | Exists _ -> failwith "tcBareFun exists"
         | Typ(t) -> (RelySet.add (x,t) acc1, HeapEnv.addVar x (Typ t) acc2)
         | OpenArrow(_,tArgs,tRet) ->
             let tArrow = TArrow (tArgs, tRet) in
@@ -319,7 +432,10 @@ and tcBareFun typeEnv heapEnv xs body =
   run tcStmt (typeEnv, heapEnvFun, body)
     (fun body -> Err (eFun xs body))
     (fun body (ptBody,_,out) ->
+       (* don't need locs, because no effects in function types (for now) *)
+       let (_,ptBody) = stripExists ptBody in
        match ptBody with
+        | Exists _ -> assert false
         | OpenArrow _ ->
             Err (eFun xs (sTcErr "function body has an open type" body))
         | Typ(tBody) ->
@@ -328,6 +444,7 @@ and tcBareFun typeEnv heapEnv xs body =
             let rely =
               RelySet.filter
                 (fun (x,_) -> Vars.mem x out.MoreOut.usedVars) rely in
+            let tRet = removeLocsFromType tRet in
             let arrow = ptArrow rely tArgs tRet in
             let out = { out with MoreOut.retTypes = Types.empty } in
             Ok (eAs (eFun xs body) arrow, (arrow, heapEnv, out)))
@@ -335,7 +452,7 @@ and tcBareFun typeEnv heapEnv xs body =
 and tcAnnotatedFun typeEnv heapEnv xs body rely tArgs tRet =
   if List.length xs <> List.length tArgs
     then failwith "add handling for len(actuals) != len(formals)";
-  let typeEnv = TypeEnv.addVar "@ret" (InvariantRef TAny) typeEnv in
+  let typeEnv = TypeEnv.addVar "@ret" (InvariantRef tRet) typeEnv in
   let (typeEnv,heapEnvFun) =
     List.fold_left (fun (acc1,acc2) (x,t) ->
       (TypeEnv.addVar x StrongRef acc1, HeapEnv.addVar x (Typ t) acc2)
@@ -346,7 +463,9 @@ and tcAnnotatedFun typeEnv heapEnv xs body rely tArgs tRet =
   run tcStmt (typeEnv, heapEnvFun, body)
     (fun body -> Err (eFun xs body))
     (fun body (ptBody,_,_) ->
+       let (_,ptBody) = stripExists ptBody in (* same as above *)
        match ptBody with
+        | Exists _ -> assert false
         | OpenArrow _ ->
             Err (eFun xs (sTcErr "function body has an open type" body))
         | Typ(tBody) ->
@@ -399,6 +518,37 @@ and tcApp2 typeEnv heapEnv outFun eFun eArgs tFun =
          | Some(heapEnv,out) ->
              Ok (eApp eFun eArgs, (Typ TAny, heapEnv, out))))
 
+and tcObjLit typeEnv heapEnv locObj fieldExps =
+  let (fieldExps,maybeOutput) =
+    List.fold_left (fun (fieldExps,maybeOutput) (field,eField) ->
+      match maybeOutput with
+       | None -> (fieldExps @ [(field, eField)], None)
+       | Some(existentials,fieldTypes,heapEnv,out) ->
+           run tcExp (typeEnv, heapEnv, eField)
+             (fun eField -> (fieldExps @ [(field, eField)], None)) 
+             (fun eField (ptField,heapEnv,out') ->
+                match stripClosedType ptField with
+                 | None ->
+                     let eField = eTcErr "bad pre-type" eField in
+                     (fieldExps @ [(field, eField)], None)
+                 | Some(locs,tField) ->
+                     let fieldExps = fieldExps @ [(field, eField)] in
+                     let fieldTypes = fieldTypes @ [(field, tField)] in
+                     let out = MoreOut.combine out out' in
+                     let existentials = existentials @ locs in
+                     (fieldExps, Some (existentials, fieldTypes, heapEnv, out)))
+    ) ([], Some ([], [], heapEnv, MoreOut.empty)) fieldExps in
+  let obj = eObj fieldExps in
+  begin match maybeOutput with
+    | None -> Err obj
+    | Some(existentials,fieldTypes,heapEnv,out) ->
+        let tRecd = TRecd (ExactDomain, fieldTypes) in
+        let tPtr = Typ (TRefLoc (LVar locObj)) in
+        let ptPtr = addExists (existentials @ [locObj]) tPtr in
+        let heapEnv = HeapEnv.addLoc (LVar locObj) tRecd heapEnv in
+        Ok (obj, (ptPtr, heapEnv, out))
+  end
+
 and tcStmt ((typeEnv, heapEnv, stmt) as args) = match stmt.stmt with
 
   | SReturn(e) | SVarAssign(_,e)
@@ -421,57 +571,40 @@ and _tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
       run tcExp (typeEnv, heapEnv, e)
         (fun e -> Err (sRet e))
         (fun e (pt,heapEnv,out) ->
+           let (locs,pt) = stripExists pt in
            match pt with
-            | OpenArrow _ ->
-                Err (sTcErr "return expression has an open type" (sRet e))
+            | Exists _ -> assert false
+            | OpenArrow _ -> Err (sTcErr "return exp has open type" (sRet e))
             | Typ(t) ->
                 let tExpected = TypeEnv.lookupRetType typeEnv in
                 run coerce (e, t, tExpected)
-                   (fun e -> Err (sRet e))
-                   (fun e () ->
-                      let out = MoreOut.addRetType t out in
-                      Ok (sRet e, (Typ TBot, heapEnv, out))))
+                  (fun e -> Err (sRet e))
+                  (fun e () ->
+                     let out = MoreOut.addRetType t out in
+                     Ok (sRet e, (addExists locs (Typ TBot), heapEnv, out))))
 
+    (* combination of SVarDecl, SVarAssign, EObj, and SSeq rules in order
+       to allocate the object at Lx_%d *)
   | SVarDecl(x,{stmt=SSeq({stmt=SVarAssign(y,{exp=EObj(l)})},s)}) when x = y ->
       if TypeEnv.memVar x typeEnv
       then errS (spr "var [%s] is already scope" x) stmt
-      else
-        let lx = genLocVar ~name:x () in
-        let typeEnv = TypeEnv.addLocationVariable lx typeEnv in
-        let typeEnv = TypeEnv.addVar x StrongRef typeEnv in
-        let heapEnv = HeapEnv.addVar x (Typ (TRefLoc (LVar lx))) heapEnv in
-        let (fieldExps,maybeOutput) =
-          List.fold_left (fun (fieldExps,maybeOutput) (field,eField) ->
-            match maybeOutput with
-             | None -> (fieldExps @ [(field, eField)], None)
-             | Some(fieldTypes,heapEnv,out) ->
-                 run tcExp (typeEnv, heapEnv, eField)
-                   (fun eField -> (fieldExps @ [(field, eField)], None)) 
-                   (fun eField (ptField,heapEnv,out') ->
-                      match ptField with
-                       | OpenArrow _ ->
-                           let eField = eTcErr "open type" eField in
-                           (fieldExps @ [(field, eField)], None)
-                       | Typ(tField) ->
-                           let fieldExps = fieldExps @ [(field, eField)] in
-                           let fieldTypes = fieldTypes @ [(field, tField)] in
-                           let out = MoreOut.combine out out' in
-                           (fieldExps, Some (fieldTypes, heapEnv, out)))
-          ) ([], Some ([], heapEnv, MoreOut.empty)) l in
-        let obj = eObj fieldExps in
-        begin match maybeOutput with
-          | None -> Err  (sLetRef x (sSeq [sAssign x obj; s]))
-          | Some(fieldTypes,heapEnv,out) ->
-              let tRecd = TRecd (ExactDomain, fieldTypes) in
-              let heapEnv = HeapEnv.addLoc (LVar lx) tRecd heapEnv in
-              run tcStmt (typeEnv, heapEnv, s)
-                (fun s -> Err (sLetRef x (sSeq [sAssign x obj; s])))
-                (fun s (pt,heapEnv,out) ->
-                   (* TODO not checking final values *)
-                   let heapEnv = HeapEnv.removeVar x heapEnv in
-                   let heapEnv = HeapEnv.removeLoc (LVar lx) heapEnv in
-                   Ok (sLetRef x (sSeq [sAssign x obj; s]), (pt, heapEnv, out)))
-        end
+      else begin
+        let locObj = genLocVar ~name:x () in
+        match tcObjLit typeEnv heapEnv locObj l with
+         | Err(obj) -> Err (sLetRef x (sSeq [sAssign x obj; s]))
+         | Ok(obj,(ptObj,heapEnv,out)) ->
+             let (locs,ptObj) = stripExists ptObj in
+             let typeEnv = TypeEnv.addLocVars locs typeEnv in
+             let typeEnv = TypeEnv.addLocVar locObj typeEnv in
+             let typeEnv = TypeEnv.addVar x StrongRef typeEnv in
+             let heapEnv = HeapEnv.addVar x ptObj heapEnv in
+             run tcStmt (typeEnv, heapEnv, s)
+               (fun s -> Err (sLetRef x (sSeq [sAssign x obj; s])))
+               (fun s (pt,heapEnv,out) ->
+                  let heapEnv = HeapEnv.removeVar x heapEnv in
+                  let pt = addExists (locs @ [locObj]) pt in
+                  Ok (sLetRef x (sSeq [sAssign x obj; s]), (pt, heapEnv, out)))
+      end
 
   | SVarDecl(x,s) ->
       if TypeEnv.memVar x typeEnv
@@ -482,7 +615,7 @@ and _tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
         run tcStmt (typeEnv, heapEnv, s)
           (fun s -> Err (wrapStmt (SVarDecl (x, s))))
           (fun s (pt,heapEnv,out) ->
-             let heapEnv = HeapEnv.removeVar x heapEnv in (* TODO not checking *)
+             let heapEnv = HeapEnv.removeVar x heapEnv in
              Ok (sLetRef x s, (pt, heapEnv, out)))
 
   | SVarAssign(x,e) ->
@@ -497,20 +630,25 @@ and _tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
             run tcExp (typeEnv, heapEnv, e)
               (fun e -> Err (sAssign x e))
               (fun e (pt,heapEnv,out) ->
+                 let (locs,pt) = stripExists pt in
                  let heapEnv = HeapEnv.addVar x pt heapEnv in
-                 Ok (sAssign x e, (pt, heapEnv, out)))
+                 Ok (sAssign x e, (addExists locs pt, heapEnv, out)))
       end
 
   | SSeq(s1,s2) ->
       run tcStmt (typeEnv, heapEnv, s1)
         (fun s1 -> Err (sSeq [s1; s2]))
         (fun s1 (pt1,heapEnv1,out1) ->
-           if pt1 = Typ TBot then Ok (sSeq [s1; s2], (pt1, heapEnv1, out1))
-           else run tcStmt (typeEnv, heapEnv1, s2)
+           let (locs1,pt1') = stripExists pt1 in
+           match pt1' with
+            | Typ(TBot) -> Ok (sSeq [s1; s2], (pt1, heapEnv1, out1))
+            | _ ->
+                let typeEnv = TypeEnv.addLocVars locs1 typeEnv in
+                run tcStmt (typeEnv, heapEnv1, s2)
                   (fun s2 -> Err (sSeq [s1; s2]))
                   (fun s2 (pt2,heapEnv2,out2) ->
                      let out = MoreOut.combine out1 out2 in
-                     Ok (sSeq [s1; s2], (pt2, heapEnv2, out))))
+                     Ok (sSeq [s1; s2], (addExists locs1 pt2, heapEnv2, out))))
 
   | SIf(e1,s2,s3) ->
       (* requiring boolean guard for now *)
@@ -521,6 +659,8 @@ and _tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
            (fun s2 (ptThen,heapEnv2,out2) -> run tcStmt (typeEnv, heapEnv, s3)
               (fun s3 -> Err (sIf e1 s2 s3))
               (fun s3 (ptElse,heapEnv3,out3) ->
+                 let ptThen = snd (stripExists ptThen) in
+                 let ptElse = snd (stripExists ptElse) in
                  let (tThen,tElse) = (projTyp ptThen, projTyp ptElse) in
                  let tJoin = join tThen tElse in
                  let hJoin = joinHeapEnvs heapEnv2 heapEnv3 in
@@ -547,6 +687,7 @@ and _tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
       (match HeapEnv.lookupVar x heapEnv with
         | None -> failwith (spr "varinvariant var [%s] not found" x)
         | Some(OpenArrow _) -> failwith "varinvar open"
+        | Some(Exists _) -> failwith "varinvar exists"
         | Some(Typ(tCurrentX)) ->
             if not (sub (tCurrentX, tGoalX)) then
               (* could allow coercion in the bad case instead *)
@@ -569,7 +710,8 @@ and _tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
                      let accR = RelySet.union accR r in
                      let accG = RelySet.add (x, TArrow (tArgs, tRet)) accG in
                      (accR, accG)
-                 | Some(Typ _) -> failwith (spr "[%s] is not open func" x)
+                 | Some(Typ _)
+                 | Some(Exists _) -> failwith (spr "[%s] is not open func" x)
                  | None -> failwith "sclose 1")
            | _ -> failwith "sclose 2"
         ) (RelySet.empty, RelySet.empty) xs
@@ -590,6 +732,7 @@ and _tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
       runTcExp3 (typeEnv, heapEnv) (e1, e2, e3)
         (fun (e1,e2,e3) -> Err (sSet e1 e2 e3))
         (fun (e1,e2,e3) (pt1,_,pt3,heapEnv,out) ->
+           let (locs3,pt3) = stripExists pt3 in
            match pt1, isStr e2, pt3 with
             | Typ(TRefLoc(l)), Some(f), Typ(t3) ->
                 (match HeapEnv.lookupLoc l heapEnv with
@@ -598,14 +741,15 @@ and _tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
                       let rt' = TRecd (ExactDomain, [(f,t3)]) in
                       let rt = extendRecdType rt rt' in
                       let heapEnv = HeapEnv.addLoc l rt heapEnv in
-                      Ok (sSet e1 e2 e3, (Typ t3, heapEnv, out)))
-            | Typ(t1), _, _ ->
-                Err (sSet (eTcErr (spr "not a strong object: %s"
-                  (Printer.strTyp t1)) e1) e2 e3)
+                      Ok (sSet e1 e2 e3, (addExists locs3 (Typ t3), heapEnv, out)))
             | _, None, _ ->
                 Err (sSet e1 (eTcErr "dynamic key" e2) e3)
             | _, _, OpenArrow _ ->
-                Err (sSet e1 e2 (eTcErr "open function type" e3)))
+                Err (sSet e1 e2 (eTcErr "open function type" e3))
+            | Typ _, _, _
+            | Exists _, _, _
+            | OpenArrow _, _, _ ->
+                Err (sSet (eTcErr "not strong object type" e1) e2 e3))
 
   | SLoadedSrc(f,s) ->
       run tcStmt (typeEnv, heapEnv, s)
@@ -645,13 +789,29 @@ and tcCoerce (typeEnv, heapEnv, e, tGoal) =
     (fun e -> Err e)
     (fun e (pt,heapEnv,out) ->
        match pt with
+        | Exists _ -> errE "need to bind existentials?" e
         | OpenArrow _ -> errE "cannot coerce from open arrow" e
         | Typ(t) ->
             run coerce (e, t, tGoal)
               (fun e -> Err e)
               (fun e () -> Ok (e, (heapEnv, out))))
 
+let removeCasts prog =
+  mapStmt
+    (function
+      | EApp({exp=ECast(s,t)},[eArg]) -> eArg.exp
+      | EApp({exp=ECast _},_) -> failwith "cast should have one arg"
+      | e -> e)
+    (fun s -> s)
+    prog
+
 let typecheck prog =
+  let prog =
+    if !Settings.castInsertionMode
+    then removeCasts prog (* remove casts from previous phase *)
+    else prog
+  in
   match tcStmt (TypeEnv.empty, HeapEnv.empty, prog) with
    | Ok(prog,(_,_,_)) -> Ok (prog, ())
    | Err(prog)        -> Err prog
+

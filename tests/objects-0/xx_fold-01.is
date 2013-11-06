@@ -1,0 +1,6 @@
+var foo; foo = function () -> ref {f: num} {
+  var x; x = {};
+  x.f = 17;
+  x = fold({f: num, ...}, x);
+  return x;
+};

@@ -18,8 +18,8 @@ let rec strTyp = function
       spr "(%s) -> %s" (String.concat ", " (List.map strTyp ts)) (strTyp t)
   | TUnion(ts) ->
       spr "(%s)" (String.concat " | " (List.map strTyp ts))
-  | TRefMu(x,rt) -> spr "mu %s. %s" x (strRecdTyp rt)
-  | TRefLoc(l) -> spr "Ref(%s)" (strLoc l)
+  | TRefMu(mu) -> spr "ref %s" (strMu mu)
+  | TRefLoc(l) -> spr "ref(%s)" (strLoc l)
   (* | TExists(x,t) -> spr "exists %s. %s" x (strTyp t) *)
 
 and strRecdTyp (TRecd(width,fields)) =
@@ -30,6 +30,10 @@ and strRecdTyp (TRecd(width,fields)) =
        | UnknownDomain, [] -> "..."
        | UnknownDomain, _  -> ", ...")
 
+and strMu (x,rt) =
+  if x = "_" then strRecdTyp rt
+  else spr "mu %s. %s" x (strRecdTyp rt)
+
 and strFieldType (f,t) = spr "%s: %s" f (strTyp t)
 
 let strBinding = strFieldType
@@ -38,7 +42,8 @@ let strRelySet h =
   let l = List.map strBinding (RelySet.elements h) in
   spr "{%s}" (String.concat ", " l)
 
-let strPreTyp = function
+let rec strPreTyp = function
+  | Exists(l,pt) -> spr "exists %s. %s" l (strPreTyp pt)
   | Typ(t) -> strTyp t
   | OpenArrow(r,tArgs,tRet) ->
       spr "%s => %s" (strRelySet r) (strTyp (TArrow (tArgs, tRet)))
@@ -85,6 +90,8 @@ let rec strExp k exp = match exp.exp with
       (match LangUtils.isStr e2 with
         | Some(f) -> spr "%s.%s" (strExp k e1) f
         | None -> spr "%s[%s]" (strExp k e1) (strExp k e2))
+  | EFold(mu,e) -> spr "fold (%s, %s)" (strMu mu) (strExp k e)
+  | EUnfold(mu,e) -> spr "unfold (%s, %s)" (strMu mu) (strExp k e)
 
 and strFunAs k xs body h tArgs tRet =
   let sHeap = if RelySet.is_empty h then "" else spr "%s " (strRelySet h) in
@@ -156,3 +163,7 @@ let rec strExpAst exp = match exp.exp with
   | EAs(e,_) -> spr "EAs(%s,_)" (strExpAst e)
   | ECast _ -> "ECast(...)"
   | ETcErr _ -> "ETcErr(...)"
+  | EObj _ -> "EObj(...)"
+  | EObjRead _ -> "EObjRead(...)"
+  | EFold _ -> "EFold(...)"
+  | EUnfold _ -> "EUnfold(...)"

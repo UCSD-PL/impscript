@@ -12,6 +12,8 @@ let eCast s t      = wrapExp (ECast (s, t))
 let eTcErr s e     = wrapExp (ETcErr (s, e))
 let eObj l         = wrapExp (EObj l)
 let eGet e1 e2     = wrapExp (EObjRead (e1, e2))
+let eFold mu e     = wrapExp (EFold (mu, e))
+let eUnfold mu e   = wrapExp (EUnfold (mu, e))
 
 let wrapStmt s     = { stmt = s }
 let sRet e         = wrapStmt (SReturn e)
@@ -65,6 +67,8 @@ and mapExp_ fE fS = function
   | ETcErr(s,e) -> fE (ETcErr (s, mapExp fE fS e))
   | EObj(l) -> fE (EObj (List.map (fun (f,e) -> (f, mapExp fE fS e)) l))
   | EObjRead(e1,e2) -> fE (EObjRead (mapExp fE fS e1, mapExp fE fS e2))
+  | EFold(mu,e) -> fE (EFold (mu, mapExp fE fS e))
+  | EUnfold(mu,e) -> fE (EUnfold (mu, mapExp fE fS e))
 
 and mapStmt_ fE fS = function
   | SExp(e) -> fS (SExp (mapExp fE fS e))
@@ -80,6 +84,17 @@ and mapStmt_ fE fS = function
   | SExternVal(x,t,s) -> fS (SExternVal (x, t, mapStmt fE fS s))
   | SObjAssign(e1,e2,e3) ->
       fS (SObjAssign (mapExp fE fS e1, mapExp fE fS e2, mapExp fE fS e3))
+
+let rec mapTyp fT = function
+  | TBase(bt) -> fT (TBase bt)
+  | TArrow(ts,t) -> fT (TArrow (List.map (mapTyp fT) ts, mapTyp fT t))
+  | TUnion(ts) -> fT (TUnion (List.map (mapTyp fT) ts))
+  | TAny -> fT TAny
+  | TBot -> fT TBot
+  | TRefLoc(l) -> fT (TRefLoc l)
+  | TRefMu(x,TRecd(width,fts)) ->
+      let fts = List.map (fun (f,t) -> (f, mapTyp fT t)) fts in
+      fT (TRefMu (x, TRecd (width, fts)))
 
 (* [e; undefined] is inserted often by LamJS and ImpScript parsing *)
 let removeUndefs stmt =

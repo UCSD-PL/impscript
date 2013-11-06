@@ -25,7 +25,6 @@ type typ =
   | TBot
   | TRefMu of mu_type
   | TRefLoc of loc
-  (* | TExists of var * typ *)
 
 and recd_type =
   | TRecd of width * (field * typ) list
@@ -40,6 +39,7 @@ type rely = RelySet.t
 type pre_type =
   | Typ of typ
   | OpenArrow of rely * typ list * typ
+  | Exists of var * pre_type
 
 type base_val =
   | VNum of float

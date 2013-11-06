@@ -54,8 +54,8 @@ let rec stmtOfBlock : block -> stmt = function
   EOF NULL UNDEF
   IF ELSE COMMA COLON LBRACE RBRACE SEMI LPAREN RPAREN LBRACK RBRACK
   PIPE FUN RET LETREF EQ EQARROW AS ARROW WHILE DOT
-  EXTERN VAL INVARIANT CLOSE
-  TANY TBOT
+  EXTERN VAL INVARIANT CLOSE FOLD UNFOLD
+  TANY TBOT REF DOTS MU
 
 %type <Lang.stmt> program
 %start program
@@ -99,6 +99,8 @@ exp_ :
  | LBRACE l=separated_list(COMMA,field_exp) RBRACE  { EObj l }
  | e=exp DOT f=VAR                                  { EObjRead (e, eStr f) }
  | e1=exp LBRACK e2=exp RBRACK                      { EObjRead (e1, e2) }
+ | FOLD LPAREN mu=mu_type COMMA e=exp RPAREN        { EFold (mu, e) }
+ | UNFOLD LPAREN mu=mu_type COMMA e=exp RPAREN      { EUnfold (mu, e) }
 
  | FUN LPAREN xts=separated_list(COMMA,maybe_annotated_formal) RPAREN
      tRetOpt=option(func_ret_type)
@@ -139,8 +141,30 @@ typ :
  | LPAREN s=typ PIPE ts=separated_list(PIPE,typ) RPAREN { tUnion (s::ts) }
      (* conflicts for union types without parens... *)
 
+ | REF mu=mu_type { TRefMu mu }
+
+mu_type : 
+ | x=option(mu_binder) LBRACE fts=separated_list(COMMA,field_type) RBRACE
+     { let x = match x with | Some(x) -> x | None -> "_" in
+       let (width,fts) =
+         if fts = [] then (ExactDomain, fts)
+         else match List.rev fts with
+           | ("...",_)::fts -> (UnknownDomain, fts)
+           | _              -> (ExactDomain, fts)
+       in
+       let l = List.filter (fun (f,_) -> f = "...") fts in
+       if List.length l > 0 then Log.printParseErr "[...] must appear at end";
+       (x, TRecd (width, fts)) }
+
 field_exp :
  | f=VAR EQ e=exp { (f, e) }
+
+field_type :
+ | f=VAR COLON t=typ { (f, t) }
+ | DOTS              { ("...", TBot) }
+
+mu_binder :
+ | MU x=VAR DOT { x }
 
 exp : e=exp_ { wrapExp e } (* TODO attach line info here... *)
 

@@ -1,0 +1,20 @@
+extern val _plus : (num, num) -> num
+
+var foo; foo = function () -> any {
+  return {f = 17};
+};
+var x; x = foo();
+
+x = (any => ref {})(x);
+x = unfold({}, x);
+(ref {} => ref {f:any})(x);
+x.f = (any => num)(x.f);
+
+_plus(1, x.f);
+
+(ref {f:num} => ref {f:num, g:any})(x);
+x.g = (any => num)(x.g);
+
+_plus(1, x.g);
+
+x = fold({f:num, g:num}, x);

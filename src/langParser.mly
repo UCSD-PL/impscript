@@ -15,6 +15,7 @@ type parse_stmt = (* TODO attach line info *)
   | PSVarInvariant of var * typ
   | PSClose of var list
   | PSExternVal of var * typ
+  | PSTcInsert of parse_stmt
 
 and block = parse_stmt list
 
@@ -22,24 +23,23 @@ let rec stmtOfBlock : block -> stmt = function
 
   (* pair binding forms with their scopes... *)
   | PSVarDecl(x)::l -> sLetRef x (stmtOfBlock l)
-  | PSVarInvariant(x,t)::l ->
-      wrapStmt (SVarInvariant (x, t, stmtOfBlock l))
-  | PSExternVal(x,t)::l ->
-      wrapStmt (SExternVal (x, t, stmtOfBlock l))
-  | PSClose(xs)::l ->
-      wrapStmt (SClose (xs, stmtOfBlock l))
+  | PSVarInvariant(x,t)::l -> sInvar x t (stmtOfBlock l)
+  | PSExternVal(x,t)::l -> sExtern x t (stmtOfBlock l)
+  | PSClose(xs)::l -> sClose xs (stmtOfBlock l)
+
+  (* ... a couple simple cases ... *)
+  | [] -> sSkip
+  | PSTcInsert(s)::l -> sTcInsert (stmtOfBlock (s::l))
 
   (* ... and use sequences for the rest *)
-  | [] -> sSkip
   | PSExp(e)::l -> sSeq [sExp e; stmtOfBlock l]
   | PSVarAssign(x,e)::l -> sSeq [sAssign x e; stmtOfBlock l]
   | PSObjAssign(e1,e2,e3)::l -> sSeq [sSet e1 e2 e3; stmtOfBlock l]
   | PSReturn(e)::l -> sSeq [sRet e; stmtOfBlock l]
+  | PSWhile(e,s)::l -> sSeq [sWhile e (stmtOfBlock s); stmtOfBlock l]
   | PSIf(e,s1,s2)::l ->
       let (s1,s2) = (stmtOfBlock s1, stmtOfBlock s2) in
       sSeq [sIf e s1 s2; stmtOfBlock l]
-  | PSWhile(e,s)::l ->
-      sSeq [sWhile e (stmtOfBlock s); stmtOfBlock l]
 
 %}
 
@@ -77,9 +77,9 @@ parse_stmt :
    ELSE LBRACE s2=block RBRACE  { PSIf (e,s1,s2) }
  | WHILE LPAREN e=exp RPAREN LBRACE s=block RBRACE { PSWhile(e,s) } 
  | EXTERN VAL x=VAR COLON t=typ { PSExternVal (x,t) }
- | LBRACK INVARIANT x=VAR COLON t=typ RBRACK { PSVarInvariant (x,t) }
- | LBRACK CLOSE LBRACE xs=separated_list(COMMA,VAR) RBRACE RBRACK
-    { PSClose xs }
+ | INVARIANT x=VAR COLON t=typ SEMI { PSVarInvariant (x,t) }
+ | CLOSE LBRACE xs=separated_list(COMMA,VAR) RBRACE SEMI { PSClose xs }
+ | LBRACK ps=parse_stmt RBRACK { PSTcInsert ps }
 
 base_val :
  | b=VBOOL { VBool b }
@@ -121,6 +121,8 @@ exp_ :
          List.fold_left
            (fun acc (x,t) -> RelySet.add (x,t) acc) RelySet.empty r in
        EAs (eFun xs (stmtOfBlock b), ptArrow h tArgs tRet) }
+
+ | LBRACK e=exp_ RBRACK { ETcInsert (wrapExp e) }
 
 maybe_annotated_formal :
  | x=VAR COLON t=typ { (x, Some t) }

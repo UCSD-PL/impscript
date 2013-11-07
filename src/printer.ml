@@ -20,7 +20,6 @@ let rec strTyp = function
       spr "(%s)" (String.concat " | " (List.map strTyp ts))
   | TRefMu(mu) -> spr "ref %s" (strMu mu)
   | TRefLoc(l) -> spr "ref(%s)" (strLoc l)
-  (* | TExists(x,t) -> spr "exists %s. %s" x (strTyp t) *)
 
 and strRecdTyp (TRecd(width,fields)) =
   spr "{%s%s}"
@@ -82,7 +81,8 @@ let rec strExp k exp = match exp.exp with
       else strFunAs k xs body r tArgs tRet
   | EAs(e,pt) -> strEAs k e pt
   | ECast(s,t) -> spr "(%s => %s)" (strTyp s) (strTyp t)
-  | ETcErr(s,e) -> spr "[[[ %s !!! TC ERROR !!! %s ]]]" (strExp k e) s
+  | ETcErr(s,e,_) -> spr "[[[ %s !!! TC ERROR !!! %s ]]]" (strExp k e) s
+  | ETcInsert(e) -> spr "[%s]" (strExp k e)
   | EObj(l) ->
       spr "{%s}" (String.concat ", "
         (List.map (fun (f, e) -> spr "%s = %s" f (strExp k e)) l))
@@ -113,6 +113,8 @@ and strStmt k stmt = match stmt.stmt with
       spr "var %s; %s = %s;\n%s%s" x x (strExp k e) (tab k) (strStmt k s)
   | SVarDecl(x,s) -> spr "var %s;\n%s%s" x (tab k) (strStmt k s)
   | SVarAssign(x,e) -> spr "%s = %s;" x (strExp k e)
+  (* | SSeq(s0,s) when s0 = LangUtils.sSkip -> spr "%s" (clip (strStmt k s)) *)
+  (* | SSeq(s,s0) when s0 = LangUtils.sSkip -> spr "%s" (clip (strStmt k s)) *)
   | SSeq(s1,s2) ->
       spr "%s\n%s%s" (clip (strStmt k s1)) (tab k) (clip (strStmt k s2))
   | SIf(e,s1,s2) ->
@@ -125,12 +127,19 @@ and strStmt k stmt = match stmt.stmt with
         spr "while (%s) {\n" (strExp k e)
       ^ spr "%s%s\n"         (tab (succ k)) (strStmt (succ k) s)
       ^ spr "%s}"            (tab k)
+  | STcInsert({stmt=SVarInvariant(x,t,s)}) ->
+      spr "[invariant %s : %s;]\n%s%s" x (strTyp t) (tab k) (strStmt k s)
+  | STcInsert({stmt=SClose(xs,s)}) ->
+      spr "[close {%s};]\n%s%s" (String.concat ", " xs) (tab k) (strStmt k s)
+  | STcInsert(s) ->
+      spr "[%s]" (strStmt k s)
   | SVarInvariant(x,t,s) ->
-      spr "[invariant %s : %s]\n%s%s" x (strTyp t) (tab k) (strStmt k s)
+      spr "invariant %s : %s;\n%s%s" x (strTyp t) (tab k) (strStmt k s)
   | SClose(xs,s) ->
-      spr "[close {%s}]\n%s%s" (String.concat ", " xs) (tab k) (strStmt k s)
+      spr "close {%s};\n%s%s" (String.concat ", " xs) (tab k) (strStmt k s)
   | SLoadedSrc(f,s) ->
       spr "\n%s(*** %s ***)\n\n%s%s" (tab k) f (tab k) (strStmt k s)
+      (* spr "\n%s\n\n%s%s" (tab k) (tab k) (strStmt k s) *)
   | SExternVal(x,t,s) ->
       spr "extern val %s : %s\n%s%s" x (strTyp t) (tab k) (strStmt k s)
   | SObjAssign(e1,e2,e3) ->
@@ -163,6 +172,7 @@ let rec strExpAst exp = match exp.exp with
   | EAs(e,_) -> spr "EAs(%s,_)" (strExpAst e)
   | ECast _ -> "ECast(...)"
   | ETcErr _ -> "ETcErr(...)"
+  | ETcInsert _ -> "ETcInsert(...)"
   | EObj _ -> "EObj(...)"
   | EObjRead _ -> "EObjRead(...)"
   | EFold _ -> "EFold(...)"

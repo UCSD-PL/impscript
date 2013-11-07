@@ -59,7 +59,8 @@ type exp_ =
   | EUnfold of mu_type * exp
   | EAs of exp * pre_type
   | ECast of typ * typ
-  | ETcErr of string * exp
+  | ETcErr of string * exp * stmt option (* stmt option for backtracking *)
+  | ETcInsert of exp
 
 and stmt_ =
   | SExp of exp
@@ -74,6 +75,7 @@ and stmt_ =
   | SClose of var list * stmt
   | SLoadedSrc of string * stmt
   | SExternVal of var * typ * stmt
+  | STcInsert of stmt
 
 and exp = { exp: exp_ }
 and stmt = { stmt: stmt_ }

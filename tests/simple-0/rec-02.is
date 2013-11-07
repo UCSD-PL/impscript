@@ -7,6 +7,7 @@ extern val _mult : (num, num) -> num
 extern val _eek : (str, str) -> bool
 extern val _typeof : (any) -> str
 extern val _not : (bool) -> bool
+extern val _lt : (num, num) -> bool
 extern val _le : (num, num) -> bool
 var f; f = undefined;
 var g; g = undefined;
@@ -16,5 +17,5 @@ f = function {g: () -> any} () -> any {
 g = function {f: () -> any} () -> any {
   f();
 };
-[close {f, g}]
-undefined;
+[close {f, g};]
+f();

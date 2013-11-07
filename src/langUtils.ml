@@ -9,11 +9,11 @@ let eVar x         = wrapExp (EVarRead x)
 let eApp e es      = wrapExp (EApp (e, es))
 let eAs e t        = wrapExp (EAs (e, t))
 let eCast s t      = wrapExp (ECast (s, t))
-let eTcErr s e     = wrapExp (ETcErr (s, e))
 let eObj l         = wrapExp (EObj l)
 let eGet e1 e2     = wrapExp (EObjRead (e1, e2))
 let eFold mu e     = wrapExp (EFold (mu, e))
 let eUnfold mu e   = wrapExp (EUnfold (mu, e))
+let eTcInsert e    = wrapExp (ETcInsert e)
 
 let wrapStmt s     = { stmt = s }
 let sRet e         = wrapStmt (SReturn e)
@@ -24,8 +24,10 @@ let sClose xs s    = wrapStmt (SClose (xs, s))
 let sIf e s1 s2    = wrapStmt (SIf (e, s1, s2))
 let sWhile e s     = wrapStmt (SWhile (e, s))
 let sLoaded f s    = wrapStmt (SLoadedSrc (f, s))
+let sExtern x t s  = wrapStmt (SExternVal (x, t, s))
 let sExp e         = wrapStmt (SExp e)
 let sSet e1 e2 e3  = wrapStmt (SObjAssign (e1, e2, e3))
+let sTcInsert s    = wrapStmt (STcInsert s)
 let sSkip          = sExp (eUndef)
 
 let rec sSeq = function
@@ -34,6 +36,9 @@ let rec sSeq = function
   | s::ss -> wrapStmt (SSeq (s, sSeq ss))
 
 let sSeq_ ss = (sSeq ss).stmt
+
+let eTcErr s e          = wrapExp (ETcErr (s, e, None))
+let eTcErrRetry s e so  = wrapExp (ETcErr (s, e, Some so))
 
 let tNum    = TBase TNum
 let tStr    = TBase TStr
@@ -64,7 +69,8 @@ and mapExp_ fE fS = function
   | EApp(e,es) -> fE (EApp (mapExp fE fS e, List.map (mapExp fE fS) es))
   | EAs(e,t) -> fE (EAs (mapExp fE fS e, t))
   | ECast(s,t) -> fE (ECast (s, t))
-  | ETcErr(s,e) -> fE (ETcErr (s, mapExp fE fS e))
+  | ETcErr(s,e,so) -> fE (ETcErr (s, mapExp fE fS e, so)) (* skipping so *)
+  | ETcInsert(e) -> fE (ETcInsert (mapExp fE fS e))
   | EObj(l) -> fE (EObj (List.map (fun (f,e) -> (f, mapExp fE fS e)) l))
   | EObjRead(e1,e2) -> fE (EObjRead (mapExp fE fS e1, mapExp fE fS e2))
   | EFold(mu,e) -> fE (EFold (mu, mapExp fE fS e))
@@ -82,6 +88,7 @@ and mapStmt_ fE fS = function
   | SClose(xs,s) -> fS (SClose (xs, mapStmt fE fS s))
   | SLoadedSrc(f,s) -> fS (SLoadedSrc (f, mapStmt fE fS s))
   | SExternVal(x,t,s) -> fS (SExternVal (x, t, mapStmt fE fS s))
+  | STcInsert(s) -> fS (STcInsert (mapStmt fE fS s))
   | SObjAssign(e1,e2,e3) ->
       fS (SObjAssign (mapExp fE fS e1, mapExp fE fS e2, mapExp fE fS e3))
 
@@ -95,6 +102,90 @@ let rec mapTyp fT = function
   | TRefMu(x,TRecd(width,fts)) ->
       let fts = List.map (fun (f,t) -> (f, mapTyp fT t)) fts in
       fT (TRefMu (x, TRecd (width, fts)))
+
+let rec foldExp fE fS acc {exp=e} =
+  foldExp_ fE fS acc e
+
+and foldStmt fE fS acc {stmt=s} =
+  foldStmt_ fE fS acc s
+
+and foldExp_ fE fS acc = function
+  | EBase(v) ->
+      fE acc (EBase v)
+  | EVarRead(x) ->
+      fE acc (EVarRead x)
+  | EFun(xs,s) ->
+      let acc = foldStmt fE fS acc s in
+      fE acc (EFun (xs, s))
+  | EApp(e,es) ->
+      let acc = List.fold_left (foldExp fE fS) acc (e::es) in
+      fE acc (EApp (e, es))
+  | EAs(e,t) ->
+      let acc = foldExp fE fS acc e
+      in fE acc (EAs (e, t))
+  | ECast(s,t) ->
+      fE acc (ECast (s, t))
+  | ETcErr(s,e,so) ->
+      let acc = foldExp fE fS acc e in
+      fE acc (ETcErr (s, e, so)) (* skipping so *)
+  | ETcInsert(e) ->
+      let acc = foldExp fE fS acc e in
+      fE acc (ETcInsert e)
+  | EObj(l) ->
+      let acc = List.fold_left (fun acc (_,e) -> foldExp fE fS acc e) acc l in
+      fE acc (EObj l)
+  | EObjRead(e1,e2) ->
+      let acc = List.fold_left (foldExp fE fS) acc [e1;e2] in
+      fE acc (EObjRead (e1, e2))
+  | EFold(mu,e) ->
+      let acc = foldExp fE fS acc e in
+      fE acc (EFold (mu, e))
+  | EUnfold(mu,e) ->
+      let acc = foldExp fE fS acc e in
+      fE acc (EUnfold (mu, e))
+
+and foldStmt_ fE fS acc = function
+  | SExp(e) ->
+      let acc = foldExp fE fS acc e in
+      fS acc (SExp e)
+  | SReturn(e) ->
+      let acc = foldExp fE fS acc e in
+      fS acc (SReturn e)
+  | SVarDecl(x,s) ->
+      let acc = foldStmt fE fS acc s in
+      fS acc (SVarDecl (x, s))
+  | SVarAssign(x,e) ->
+      let acc = foldExp fE fS acc e in
+      fS acc (SVarAssign (x, e))
+  | SSeq(s1,s2) ->
+      let acc = List.fold_left (foldStmt fE fS) acc [s1;s2] in
+      fS acc (SSeq (s1, s2))
+  | SIf(e,s1,s2) ->
+      let acc = foldExp fE fS acc e in
+      let acc = List.fold_left (foldStmt fE fS) acc [s1;s2] in
+      fS acc (SIf (e, s1, s2))
+  | SWhile(e,s) ->
+      let acc = foldExp fE fS acc e in
+      let acc = foldStmt fE fS acc s in
+      fS acc (SWhile (e, s))
+  | SVarInvariant(x,t,s) ->
+      let acc = foldStmt fE fS acc s in
+      fS acc (SVarInvariant (x, t, s))
+  | SClose(xs,s) ->
+      let acc = foldStmt fE fS acc s in
+      fS acc (SClose (xs, s))
+  | SLoadedSrc(f,s) ->
+      let acc = foldStmt fE fS acc s in
+      fS acc (SLoadedSrc (f, s))
+  | SExternVal(x,t,s) ->
+      let acc = foldStmt fE fS acc s in
+      fS acc (SExternVal (x, t, s))
+  | STcInsert(s) ->
+      let acc = foldStmt fE fS acc s in
+      fS acc (STcInsert s)
+  | SObjAssign(e1,e2,e3) ->
+      let acc = List.fold_left (foldExp fE fS) acc [e1;e2;e3] in
+      fS acc (SObjAssign (e1, e2, e3))
 
 (* [e; undefined] is inserted often by LamJS and ImpScript parsing *)
 let removeUndefs stmt =

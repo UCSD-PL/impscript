@@ -119,13 +119,10 @@ let doParseImpScript f =
 
 let rec addPrelude prelude prog =
   match prelude.Lang.stmt with
-    | Lang.SExternVal(x,t,s) ->
-        LangUtils.wrapStmt (Lang.SExternVal (x, t, addPrelude s prog))
-    | Lang.SLoadedSrc(f,s) ->
-        LangUtils.wrapStmt (Lang.SLoadedSrc (f, addPrelude s prog))
-    | Lang.SExp _ -> prog
-    | _ ->
-        failwith (spr "addPrelude\n%s" (Printer.strStmtAst prelude))
+    | Lang.SExternVal(x,t,s) -> LangUtils.sExtern x t (addPrelude s prog)
+    | Lang.SLoadedSrc(f,s)   -> LangUtils.sLoaded f (addPrelude s prog)
+    | Lang.SExp _            -> prog
+    | _ -> failwith (spr "addPrelude\n%s" (Printer.strStmtAst prelude))
 
 
 (***** Main *******************************************************************)
@@ -142,14 +139,15 @@ let tcCheckCasts prog f =
 let tcInsertCasts prog f =
   Settings.castInsertionMode := true;
   match Typing.typecheck prog with
-   | Typing.Ok(prog,()) -> begin
-       Log.log1 "\n%s\n" (Utils.greenString "TC + CASTS: OK");
-       Printer.printStmt prog f;
+   | Typing.Ok(prog',()) -> begin
+       Log.log1 "\n%s\n" (Utils.greenString "TRANSLATION: OK");
+       if true (* TODO compare prog and prog' for meaningful differences *)
+       then Printer.printStmt prog' f;
        (* sanity check that the inserted casts are sufficient for typing *)
-       tcCheckCasts prog f;
+       tcCheckCasts prog' f;
      end
    | Typing.Err(prog) -> begin
-       Log.log1 "\n%s " (Utils.redString "TC + CASTS: FAILED!");
+       Log.log1 "\n%s " (Utils.redString "TRANSLATION: FAILED!");
        Printer.printStmt prog f;
      end
 

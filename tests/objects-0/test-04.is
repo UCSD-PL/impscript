@@ -1,5 +1,5 @@
 
-(*** ../tests/simple-0/rec-01.1.is ***)
+
 
 extern val _plus : (num, num) -> num
 extern val _minus : (num, num) -> num
@@ -9,12 +9,9 @@ extern val _typeof : (any) -> str
 extern val _not : (bool) -> bool
 extern val _lt : (num, num) -> bool
 extern val _le : (num, num) -> bool
-var fact; fact = function {fact: (num) -> num} (n: num) -> num {
-  if (_le(n, 0)) {
-    return 1;
-  } else {
-    return _mult(n, fact(_minus(n, 1)));
-  }
+var foo; foo = function () -> ref {f: num} {
+  return [fold ({f: num}, {f = 17})];
 };
-[close {fact};]
-fact(5);
+var x; x = foo();
+[x = unfold ({f: num}, x);]
+_plus(_plus(1, x.f), x.f);

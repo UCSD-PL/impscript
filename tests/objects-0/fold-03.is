@@ -9,3 +9,4 @@ var foo; foo = function () -> ref {f: num} {
 var y; y = foo();
 y = unfold({f: num}, y);
 _plus(1, y.f);
+_plus(1, y.f);

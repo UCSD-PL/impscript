@@ -1,0 +1,7 @@
+
+(*** ../tests/objects-0/numlist-01.1.is ***)
+
+type numlist = mu 'x. {hd: num, tl: ?('x)};
+var f; f = function () -> ref numlist {
+  return [fold (numlist, {hd = 17, tl = null})];
+};

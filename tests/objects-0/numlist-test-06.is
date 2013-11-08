@@ -1,0 +1,5 @@
+var f; f = function () -> ref mu 'x. {hd: num, tl: ?('x)} {
+  var x; x = {hd = 17, tl = null};
+  [x = fold (mu 'x. {hd: num, tl: ?('x)}, x);]
+  return x;
+};

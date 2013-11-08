@@ -135,6 +135,10 @@ let rec sub = function
   | TBot, _ -> true
   | _, TAny -> true
   | s, TUnion ts when List.mem s ts -> true
+  | TBase TNull, TMaybe _
+  | TBase TUndef, TMaybe _ -> true
+  | s, TMaybe t when sub (s, t) -> true
+  | TMaybe s, TMaybe t -> sub (s, t)
   (* TODO *)
   | _ -> false
 
@@ -152,7 +156,7 @@ and recdSub (TRecd(width1,fts1), TRecd(width2,fts2)) =
   then List.for_all (fun (f,t2) -> sub (List.assoc f fts1, t2)) fts2
   else false
 
-let join s t = match s, t with
+let rec join s t = match s, t with
   | s, t when s = t -> s
   | _, TAny | TAny, _ -> TAny
   | u, TBot | TBot, u -> u
@@ -161,6 +165,23 @@ let join s t = match s, t with
   | TUnion l, u | u, TUnion l -> tUnion (u :: l)
   (* TODO *)
   | _ -> TAny
+
+and joinRecdTypes : recd_type -> recd_type -> recd_type =
+fun (TRecd(width1,fts1)) (TRecd(width2,fts2)) ->
+  let fts =
+    List.fold_left (fun acc (f,t1) ->
+      if not (List.mem_assoc f fts2) then acc
+      else let t2 = List.assoc f fts2 in (f, join t1 t2) :: acc
+    ) [] fts1
+  in
+  let width =
+    match width1, width2 with
+      | ExactDomain, ExactDomain when List.length fts = List.length fts1 ->
+          ExactDomain
+      | _ ->
+          UnknownDomain
+  in
+  TRecd (width, fts)
 
 let joinTypes : Types.t -> typ =
 fun ts ->
@@ -196,8 +217,11 @@ let joinHeapEnvs : HeapEnv.t -> HeapEnv.t -> HeapEnv.t =
     ) he1 VarMap.empty
   in
   let joinLocs he1 he2 =
-    if LocMap.is_empty he1 && LocMap.is_empty he2 then he1
-    else failwith "TODO joinLocs"
+    LocMap.fold (fun l rt1 acc ->
+      if not (LocMap.mem l he2) then acc
+      else let rt2 = LocMap.find l he2 in
+           LocMap.add l (joinRecdTypes rt1 rt2) acc
+    ) he1 LocMap.empty
   in
   fun he1 he2 ->
     { HeapEnv.vars = joinVars he1.HeapEnv.vars he2.HeapEnv.vars;
@@ -728,7 +752,8 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
         (fun e (pt,heapEnv,out) -> Ok (sExp e, (pt, heapEnv, out)))
 
   | SReturn(e) ->
-      let eOrig = e in
+      (* not just calling tcCoerce, because want to add synthesized
+         return type to output *)
       run tcExp (typeEnv, heapEnv, e)
         (fun e -> Err (sRet e))
         (fun e (pt,heapEnv,out) ->
@@ -738,20 +763,10 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
             | OpenArrow _ -> Err (sTcErr "return exp has open type" (sRet e))
             | Typ(t) ->
                 let tExpected = TypeEnv.lookupRetType typeEnv in
-                run coerce (e, t, tExpected)
-                  (fun eErr ->
-                     match lvalOf eOrig, t, tExpected with
-                      | Some(lv), TRefLoc _, TRefMu(mu) ->                   
-                          let sRetry = sAssignLval lv (eFold mu (eLval lv)) in
-                          Err (sRet (eTcErrRetry "bad ret type" e sRetry))
-                      | _, TRefLoc _, TRefMu(mu) ->
-                          (* backtracking *)
-                          run tcExp (typeEnv, heapEnv, eFold mu eOrig)
-                            (fun _ -> Err (sRet eErr))
-                            (fun e stuff ->
-                               Ok (sRet (eTcInsert (eFold mu eOrig)), stuff))
-                      | _ -> Err (sRet e))
-                  (fun e _ ->
+                run coerceOrFold (true, typeEnv, heapEnv, e, t, tExpected)
+                  (fun e -> Err (sRet e))
+                  (fun e (heapEnv,out') ->
+                     let out = MoreOut.combine out out' in
                      let out = MoreOut.addRetType t out in
                      Ok (sRet e, (addExists locs (Typ TBot), heapEnv, out))))
 
@@ -808,7 +823,9 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
       end
 
   | SSeq(s1,s2) ->
-      run tcStmt (typeEnv, heapEnv, s1)
+      (* calling __tcStmt to avoid backtracking, since want failures to
+         propagate to the caller of tcStmt on the entire sequence statement *)
+      run __tcStmt (typeEnv, heapEnv, s1)
         (fun s1 -> Err (sSeq [s1; s2]))
         (fun s1 (pt1,heapEnv1,out1) ->
            let (locs1,pt1') = stripExists pt1 in
@@ -824,7 +841,7 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
 
   | SIf(e1,s2,s3) ->
       (* requiring boolean guard for now *)
-      run tcCoerce (typeEnv, heapEnv, e1, tBool)
+      run tcCoerceLocally (typeEnv, heapEnv, e1, tBool)
         (fun e1 -> Err (sIf e1 s2 s3))
         (fun e1 (heapEnv,out1) -> run tcStmt (typeEnv, heapEnv, s2)
            (fun s2 -> Err (sIf e1 s2 s3))
@@ -970,28 +987,49 @@ and runTcExp3 (typeEnv, heapEnv) (e1, e2, e3) fError fOk =
 
 (* TODO a general tcExpN version for app1, app2, and eobj *)
 
-and tcCoerce (typeEnv, heapEnv, e, tGoal) =
-  let eInit = e in
+and tcCoerce args          = _tcCoerce true args
+and tcCoerceLocally args   = _tcCoerce false args
+
+and _tcCoerce hoistCasts (typeEnv, heapEnv, e, tGoal) =
   run tcExp (typeEnv, heapEnv, e)
     (fun e -> Err e)
     (fun e (pt,heapEnv,out) ->
+       let (_,pt) = stripExists pt in (* TODO okay to throw away locs? *)
        match pt with
-        | Exists _ -> errE "need to bind existentials?" e
+        | Exists _ -> assert false
         | OpenArrow _ -> errE "cannot coerce from open arrow" e
         | Typ(t) ->
-            run coerce (e, t, tGoal)
+            run coerceOrFold (hoistCasts, typeEnv, heapEnv, e, t, tGoal)
               (fun e -> Err e)
-              (fun e insertedCast ->
-                 if not insertedCast then Ok (e, (heapEnv, out))
-                 (* coercion succeeded, but hoist it out to an assignment *)
-                 (* if possible rather than inserting the cast locally    *)
-                 else begin
-                   match lvalOf eInit with
-                    | None -> Ok (e, (heapEnv, out))
-                    | Some(lv) ->
-                        let sRetry = sAssignLval lv e in
-                        Err (eTcErrRetry "tcCoerce backtracking" eInit sRetry)
-                 end))
+              (fun e (heapEnv,out') ->
+                 let out = MoreOut.combine out out' in
+                 Ok (e, (heapEnv, out))))
+
+and coerceOrFold (hoistCasts, typeEnv, heapEnv, e, t, tGoal) =
+  run coerce (e, t, tGoal)
+    (fun eErr ->
+       match t, tGoal, hoistCasts, lvalOf e with
+        | TRefLoc _, TMaybe(TRefMu(mu)), true, Some(lv)
+        | TRefLoc _, TRefMu(mu), true, Some(lv) ->
+            let sRetry = sAssignLval lv (eFold mu (eLval lv)) in
+            Err (eTcErrRetry "blah" e sRetry)
+        | TRefLoc _, TMaybe(TRefMu(mu)), _, _
+        | TRefLoc _, TRefMu(mu), _, _ ->
+            run tcExp (typeEnv, heapEnv, eFold mu e)
+              (fun _ -> Err e)
+              (fun _ (_,heapEnv,out) ->
+                 Ok (eTcInsert (eFold mu e), (heapEnv, out)))
+        | _ ->
+            Err eErr)
+    (fun eOk insertedCast ->
+       (* if coercion inserted, hoist it out to an assignment if
+          possible rather than inserting the cast locally *)
+       match insertedCast && hoistCasts, lvalOf e with
+        | true, Some(lv) ->
+            let sRetry = sAssignLval lv eOk in
+            Err (eTcErrRetry "tcCoerce backtracking" e sRetry)
+        | _ ->
+            Ok (eOk, (heapEnv, MoreOut.empty)))
 
 let removeTcInserts prog =
   mapStmt (* keep in sync with what tc can insert *)

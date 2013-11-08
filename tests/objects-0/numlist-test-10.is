@@ -1,0 +1,24 @@
+extern val _plus : (num, num) -> num;
+
+type numlist = mu 'x. {hd: num, tl: ?('x)};
+
+var sumList; sumList = function {sumList: (?(ref numlist)) -> num} (xs: ?(ref numlist)) -> num {
+  if ([(?(ref numlist) => bool)](xs)) {
+    return 0;
+  } else {
+    [xs = (?(ref numlist) => ref numlist)(xs);]
+    [xs = unfold (numlist, xs);]
+    return _plus(xs.hd, sumList(xs.tl));
+  }
+};
+[close {sumList};]
+
+sumList(null);
+
+var obj; obj = {hd = 1, tl = null};
+[obj = fold (numlist, obj);]
+sumList(obj);
+
+sumList([fold (numlist, {hd = 2, tl = null})]);
+
+1;

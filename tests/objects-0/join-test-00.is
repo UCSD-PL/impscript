@@ -1,0 +1,10 @@
+var f; f = function () -> ref {f: num} {
+  var x; x = {};
+  if (true) {
+    x.f = 17;
+  } else {
+    x.f = 42;
+  }
+  [x = fold ({f: num}, x);]
+  return x;
+};

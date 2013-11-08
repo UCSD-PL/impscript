@@ -1,0 +1,21 @@
+
+(*** ../tests/objects-0/numlist-02.1.is ***)
+
+extern val _plus : (num, num) -> num;
+extern val _minus : (num, num) -> num;
+extern val _mult : (num, num) -> num;
+extern val _eek : (str, str) -> bool;
+extern val _typeof : (any) -> str;
+extern val _not : (bool) -> bool;
+extern val _lt : (num, num) -> bool;
+extern val _le : (num, num) -> bool;
+type numlist = mu 'x. {hd: num, tl: ?('x)};
+var sumList; sumList = function {sumList: (?(ref numlist)) -> num} (xs: ?(ref numlist)) -> num {
+  if ([(?(ref numlist) => bool)](xs)) {
+    return 0;
+  } else {
+    [xs = (?(ref numlist) => ref numlist)(xs);]
+    [xs = unfold (numlist, xs);]
+    return _plus(xs.hd, sumList(xs.tl));
+  }
+};

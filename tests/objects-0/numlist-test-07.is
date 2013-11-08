@@ -1,0 +1,6 @@
+type numlist = mu 'x. {hd: num, tl: ?('x)};
+var f; f = function () -> ref numlist {
+  var x; x = {hd = 17, tl = null};
+  [x = fold (numlist, x);]
+  return x;
+};

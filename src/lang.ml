@@ -1,6 +1,10 @@
 
 type var = string
 
+type ty_abbrev = string
+
+type ty_var = string
+
 type field = string
 
 type width = ExactDomain | UnknownDomain
@@ -25,11 +29,15 @@ type typ =
   | TBot
   | TRefMu of mu_type
   | TRefLoc of loc
+  | TVar of ty_var
+  | TMaybe of typ
 
 and recd_type =
   | TRecd of width * (field * typ) list
 
-and mu_type = var * recd_type
+and mu_type =
+  | Mu of ty_var * recd_type
+  | MuAbbrev of ty_abbrev * typ list
 
 module RelySet =
   Set.Make (struct type t = (var * typ) let compare = compare end)
@@ -75,6 +83,7 @@ and stmt_ =
   | SClose of var list * stmt
   | SLoadedSrc of string * stmt
   | SExternVal of var * typ * stmt
+  | STyAbbrev of ty_abbrev * (ty_var list * mu_type) * stmt
   | STcInsert of stmt
 
 and exp = { exp: exp_ }

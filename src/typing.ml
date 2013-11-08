@@ -3,6 +3,8 @@ open Lang
 open LangUtils
 open Printer
 
+module StrMap = Utils.StrMap
+
 type type_env_binding =
   | Val of typ
   | StrongRef
@@ -10,10 +12,14 @@ type type_env_binding =
 
 module TypeEnv = struct
 
-  type t = { bindings: type_env_binding VarMap.t; loc_vars: Vars.t; }
+  type t = { bindings: type_env_binding VarMap.t;
+             loc_vars: Vars.t;
+             ty_abbrevs: (ty_var list * mu_type) StrMap.t; }
 
   let empty : t =
-    { bindings = VarMap.empty; loc_vars = Vars.empty }
+    { bindings = VarMap.empty;
+      loc_vars = Vars.empty;
+      ty_abbrevs = StrMap.empty; }
 
   let lookupType : var -> t -> type_env_binding option =
   fun x typeEnv ->
@@ -42,6 +48,16 @@ module TypeEnv = struct
   let addLocVars : var list -> t -> t =
   fun ls typeEnv ->
     List.fold_left (fun acc l -> addLocVar l acc) typeEnv ls
+
+  let addTyAbbrev : ty_abbrev -> (ty_var list * mu_type) -> t -> t =
+  fun x def typeEnv ->
+    { typeEnv with ty_abbrevs = StrMap.add x def typeEnv.ty_abbrevs }
+
+  let lookupTyAbbrev : ty_abbrev -> t -> (ty_var list * mu_type) option =
+  fun x typeEnv ->
+    if StrMap.mem x typeEnv.ty_abbrevs
+    then Some (StrMap.find x typeEnv.ty_abbrevs)
+    else None
 
 end
 
@@ -236,9 +252,40 @@ let removeLocsFromType : typ -> typ =
 fun t ->
   mapTyp (function TRefLoc _ -> TAny | s -> s) t
 
-(* TODO *)
-let unrollMu (x,rt) =
-  rt
+let unrollProperMu : mu_type -> (var * recd_type) -> recd_type =
+fun mu -> function
+  | "_", rt -> rt
+  | x, TRecd(width,fts) ->
+      let foo = mapTyp (function TVar(y) when x = y -> TRefMu mu | t -> t) in
+      let fts = List.map (fun (f, t) -> (f, foo t)) fts in
+      TRecd (width, fts)
+
+let unrollMu : TypeEnv.t -> mu_type -> recd_type =
+fun typeEnv mu ->
+  match mu with
+    | Mu(x,rt) -> unrollProperMu mu (x,rt)
+    | MuAbbrev(t,[]) ->
+        (match TypeEnv.lookupTyAbbrev t typeEnv with
+          | Some([],Mu(x,rt)) -> unrollProperMu mu (x,rt)
+          | None -> failwith "unrollMu 1"
+          | _ -> failwith "unrollMu 2")
+    | MuAbbrev _ -> failwith "unrollMu with type args"
+
+let castToMu : typ -> mu_type option =
+fun t ->
+  let default = Mu ("_", TRecd (UnknownDomain, [])) in
+  match t with
+    | TMaybe(TRefMu(mu)) -> Some mu
+    | TUnion(ts) ->
+        let mus =
+          List.fold_left
+            (fun acc -> function TRefMu(mu) -> mu :: acc | _ -> acc) [] ts in
+        (match mus with
+           | [mu] -> Some mu
+           | []   -> Some default
+           | _    -> None) (* don't want unions with multiple object types *)
+    | _ ->
+        Some default
 
 let transitiveAssumeVars f heapEnv =
   let rec doOne f acc =
@@ -310,11 +357,11 @@ let compatible s t = match s, t with
 let coerce (e, s, t) =
   let (s1,s2) = (strTyp s, strTyp t) in
   if sub (s, t) then
-    Ok (e, ())
+    Ok (e, false)
   else if not !Settings.castInsertionMode then
     Err (eTcErr (spr "not a subtype:\n%s\n%s" s1 s2) e)
   else if compatible s t then
-    Ok (eApp (eTcInsert (eCast s t)) [e], ())
+    Ok (eApp (eTcInsert (eCast s t)) [e], true)
   else
     Err (eTcErr (spr "not compatible:\n%s\n%s" s1 s2) e)
 
@@ -350,21 +397,28 @@ let rec tcExp (typeEnv, heapEnv, exp) = match exp.exp with
   | EAs({exp=EFun(xs,body)},OpenArrow(r,tArgs,tRet)) ->
       tcAnnotatedFun typeEnv heapEnv xs body r tArgs tRet
 
-  | EApp({exp=ECast((TRefMu("_",rt) as s),((TRefMu("_",rt')) as t))},[e]) ->
-      run tcExp (typeEnv, heapEnv, e)
-        (fun e -> Err (eApp (eCast s t) [e]))
-        (fun e (pt,heapEnv,out) ->
-           match pt with
-            | Typ(TRefLoc(l)) ->
-                (match HeapEnv.lookupLoc l heapEnv with
-                  | Some(rt0) when rt = rt0 ->
-                      let heapEnv = HeapEnv.addLoc l rt' heapEnv in
-                      Ok (eApp (eCast s t) [e], (Typ tUndef, heapEnv, out))
-                  | _ -> Err (eTcErr "app-cast error" (eApp (eCast s t) [e])))
-            | _ -> Err (eTcErr "app-cast error" (eApp (eCast s t) [e])))
-
-  | EApp({exp=ECast((TRefMu(x,rt) as s),((TRefMu(x',rt')) as t))},[e]) ->
-      failwith "TODO cast between mu types"
+  | EApp({exp=ECast((TRefMu(mu) as s),((TRefMu(mu')) as t))},[e]) ->
+      (* TODO *)
+      (match mu, mu' with
+        | Mu("_",rt), Mu("_",rt') ->
+            run tcExp (typeEnv, heapEnv, e)
+              (fun e -> Err (eApp (eCast s t) [e]))
+              (fun e (pt,heapEnv,out) ->
+                 match pt with
+                  | Typ(TRefLoc(l)) ->
+                      let cast = eApp (eCast s t) [e] in
+                      (match HeapEnv.lookupLoc l heapEnv with
+                        | Some(rt0) when rt = rt0 ->
+                            let heapEnv = HeapEnv.addLoc l rt' heapEnv in
+                            Ok (cast, (Typ tUndef, heapEnv, out))
+                        | _ ->
+                            Err (eTcErr "app-cast error" cast))
+                  | _ ->
+                      Err (eTcErr "app-cast error" (eApp (eCast s t) [e])))
+        | Mu _, Mu _ ->
+            failwith "TODO cast between mu types"
+        | _ ->
+            failwith "TODO cast involving abbrevs")
 
   | ECast(s,t) ->
       Ok (exp, (Typ (TArrow ([s], t)), heapEnv, MoreOut.empty))
@@ -424,20 +478,20 @@ let rec tcExp (typeEnv, heapEnv, exp) = match exp.exp with
                       Err (eGet (eTcErr err e1) e2))
             | Typ(t), _ ->
                 let err = spr "object type isn't strong:\n %s" (strTyp t) in
-                (match lvalOf e1 with
-                  | None -> Err (eGet (eTcErr err e1) e2)
-                  | Some(lv) ->
-                      let tMu = TRefMu ("_", TRecd (UnknownDomain, [])) in
-                      let cast = eCast t tMu in
+                (match lvalOf e1, castToMu t with
+                  | Some(lv), Some(mu) ->
+                      let cast = eCast t (TRefMu mu) in
                       let sRetry = sAssignLval lv (eApp cast [eLval lv]) in
-                      Err (eGet (eTcErrRetry err e1 sRetry) e2))
+                      Err (eGet (eTcErrRetry err e1 sRetry) e2)
+                  | _, _ ->
+                      Err (eGet (eTcErr err e1) e2))
             | _, None ->
-                 Err (eTcErr "dynamic key lookup" (eGet e1 e2))
+                Err (eTcErr "dynamic key lookup" (eGet e1 e2))
             | _, _ ->
                 let err = spr "object type not strong:\n %s" (strPreTyp pt1) in
                 Err (eGet (eTcErr err e1) e2))
 
-  | EFold(((x,rt) as mu),e) ->
+  | EFold(mu,e) ->
       run tcExp (typeEnv, heapEnv, e)
         (fun e -> Err (eFold mu e))
         (fun e (pt,heapEnv,out) ->
@@ -447,7 +501,7 @@ let rec tcExp (typeEnv, heapEnv, exp) = match exp.exp with
                 (match HeapEnv.lookupLoc l heapEnv with
                   | None -> Err (eFold mu (eTcErr "not in heap" e))
                   | Some(rt') ->
-                      let rt = unrollMu mu in
+                      let rt = unrollMu typeEnv mu in
                       if recdSub (rt', rt) then
                         let heapEnv = HeapEnv.removeLoc l heapEnv in
                         let tPtr = addExists locs (Typ (TRefMu mu)) in
@@ -460,7 +514,7 @@ let rec tcExp (typeEnv, heapEnv, exp) = match exp.exp with
                 let err = spr "object isn't strong:\n%s\n" (strPreTyp pt) in
                 Err (eFold mu (eTcErr err e)))
 
-  | EUnfold(((x,rt) as mu),e) ->
+  | EUnfold(mu,e) ->
       run tcExp (typeEnv, heapEnv, e)
         (fun e -> Err (eUnfold mu e))
         (fun e (pt,heapEnv,out) ->
@@ -469,7 +523,7 @@ let rec tcExp (typeEnv, heapEnv, exp) = match exp.exp with
                 Err (eTcErr "mu annotation doesn't match" (eUnfold mu e))
             | Typ(TRefMu _ ) ->
                 let locObj = genLocVar () in
-                let rt = unrollMu mu in
+                let rt = unrollMu typeEnv mu in
                 let heapEnv = HeapEnv.addLoc (LVar locObj) rt heapEnv in
                 let ptr = Typ (TRefLoc (LVar locObj)) in
                 Ok (eUnfold mu e, (Exists (locObj, ptr), heapEnv, out))
@@ -583,7 +637,7 @@ and tcApp2 typeEnv heapEnv outFun eFun eArgs tFun =
   let tAnys = List.map (function _ -> TAny) eArgs in
   run coerce (eFun, tFun, TArrow (tAnys, TAny))
     (fun eFun -> Err (eApp eFun eArgs))
-    (fun eFun () ->
+    (fun eFun _ ->
        let (eArgs,maybeOutput) =
          List.fold_left (fun (eArgs,maybeOutput) eArg ->
            match maybeOutput with
@@ -697,7 +751,7 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
                             (fun e stuff ->
                                Ok (sRet (eTcInsert (eFold mu eOrig)), stuff))
                       | _ -> Err (sRet e))
-                  (fun e () ->
+                  (fun e _ ->
                      let out = MoreOut.addRetType t out in
                      Ok (sRet e, (addExists locs (Typ TBot), heapEnv, out))))
 
@@ -887,6 +941,13 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
         (fun s -> Err (sTcInsert s))
         (fun s stuff -> Ok (sTcInsert s, stuff))
 
+  | STyAbbrev(x,def,s) ->
+      (* TODO check well-formedness of def *)
+      let typeEnv = TypeEnv.addTyAbbrev x def typeEnv in
+      run tcStmt (typeEnv, heapEnv, s)
+        (fun s -> Err (sTyDef x def s))
+        (fun s stuff -> Ok (sTyDef x def s, stuff))
+
 and runTcExp2 (typeEnv, heapEnv) (e1, e2) fError fOk =
   run tcExp (typeEnv, heapEnv, e1)
     (fun e1 -> fError (e1, e2))
@@ -920,8 +981,8 @@ and tcCoerce (typeEnv, heapEnv, e, tGoal) =
         | Typ(t) ->
             run coerce (e, t, tGoal)
               (fun e -> Err e)
-              (fun e () ->
-                 if eInit = e then Ok (e, (heapEnv, out))
+              (fun e insertedCast ->
+                 if not insertedCast then Ok (e, (heapEnv, out))
                  (* coercion succeeded, but hoist it out to an assignment *)
                  (* if possible rather than inserting the cast locally    *)
                  else begin

@@ -1,0 +1,19 @@
+
+(*** ../tests/objects-0/numlist-00.1.is ***)
+
+extern val _plus : (num, num) -> num;
+var foo; foo = function (xs: ref mu 'x. {hd: any, tl: 'x}) -> num {
+  [xs = unfold (mu 'x. {hd: any, tl: 'x}, xs);]
+  [xs.hd = [(any => num)](xs.hd);]
+  _plus(1, xs.hd);
+  _plus(2, xs.hd);
+  [xs.tl = unfold (mu 'x. {hd: any, tl: 'x}, xs.tl);]
+  [xs.tl.hd = [(any => num)](xs.tl.hd);]
+  _plus(3, xs.tl.hd);
+  _plus(4, xs.tl.hd);
+  [xs.tl.tl = unfold (mu 'x. {hd: any, tl: 'x}, xs.tl.tl);]
+  [xs.tl.tl.hd = [(any => num)](xs.tl.tl.hd);]
+  _plus(5, xs.tl.tl.hd);
+  _plus(6, xs.tl.tl.hd);
+  return _plus(_plus(xs.hd, xs.tl.hd), xs.tl.tl.hd);
+};

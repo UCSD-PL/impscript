@@ -20,6 +20,8 @@ let rec strTyp = function
       spr "(%s)" (String.concat " | " (List.map strTyp ts))
   | TRefMu(mu) -> spr "ref %s" (strMu mu)
   | TRefLoc(l) -> spr "ref(%s)" (strLoc l)
+  | TVar(x) -> x
+  | TMaybe(t) -> spr "?(%s)" (strTyp t)
 
 and strRecdTyp (TRecd(width,fields)) =
   spr "{%s%s}"
@@ -29,9 +31,11 @@ and strRecdTyp (TRecd(width,fields)) =
        | UnknownDomain, [] -> "..."
        | UnknownDomain, _  -> ", ...")
 
-and strMu (x,rt) =
-  if x = "_" then strRecdTyp rt
-  else spr "mu %s. %s" x (strRecdTyp rt)
+and strMu = function
+  | Mu("_",rt)     -> strRecdTyp rt
+  | Mu(x,rt)       -> spr "mu %s. %s" x (strRecdTyp rt)
+  | MuAbbrev(x,[]) -> x
+  | MuAbbrev(x,ts) -> spr "%s(%s)" x (String.concat ", " (List.map strTyp ts))
 
 and strFieldType (f,t) = spr "%s: %s" f (strTyp t)
 
@@ -102,7 +106,9 @@ and strFunAs k xs body h tArgs tRet =
     (tab (succ k)) (clip (strStmt (succ k) body))
   (tab k)
 
-and strEAs k e pt = spr "%s as %s" (strExp k e) (strPreTyp pt)
+and strEAs k e pt =
+  spr "%s as (%s)" (strExp k e) (strPreTyp pt)
+  (* spr "%s as %s" (strExp k e) (strPreTyp pt) *)
 
 and strStmt k stmt = match stmt.stmt with
   | SExp(e) -> spr "%s;" (strExp k e)
@@ -141,7 +147,12 @@ and strStmt k stmt = match stmt.stmt with
       spr "\n%s(*** %s ***)\n\n%s%s" (tab k) f (tab k) (strStmt k s)
       (* spr "\n%s\n\n%s%s" (tab k) (tab k) (strStmt k s) *)
   | SExternVal(x,t,s) ->
-      spr "extern val %s : %s\n%s%s" x (strTyp t) (tab k) (strStmt k s)
+      spr "extern val %s : %s;\n%s%s" x (strTyp t) (tab k) (strStmt k s)
+      (* spr "extern val %s : %s\n%s%s" x (strTyp t) (tab k) (strStmt k s) *)
+  | STyAbbrev(x,(ys,mu),s) ->
+      let tvars = if ys = [] then "" else spr "(%s)" (String.concat ", " ys) in
+        spr "type %s%s = %s;\n" x tvars (strMu mu)
+      ^ spr "%s%s"              (tab k) (strStmt k s)
   | SObjAssign(e1,e2,e3) ->
       (match LangUtils.isStr e2 with
         | Some(f) -> spr "%s.%s = %s;" (strExp k e1) f (strExp k e3)

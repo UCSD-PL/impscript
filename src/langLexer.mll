@@ -45,6 +45,7 @@ rule token = parse
   | "null"         { NULL }
   | "undefined"    { UNDEF }
   | "extern"       { EXTERN }
+  | "type"         { TYPE }
   | "invariant"    { INVARIANT }
   | "close"        { CLOSE }
   | "fold"         { FOLD }
@@ -61,12 +62,13 @@ rule token = parse
   | ";"            { SEMI }
   | ":"            { COLON }
   | "|"            { PIPE }
+  | "?"            { QMARK }
 
   | digit+ as s              { INT (int_of_string s) }
   | digit+ '.' digit* as s   { NUM (float_of_string s) }
   | ident as s               { VAR s } (* replace prime if going to Z3 *)
   | '"' (str as s) '"'       { STR s}
-  (* | tyvar as s          { TVAR s } *)
+  | tyvar as s               { TVAR s }
 
   | white       { token lexbuf }
   | newline     { Lexing.new_line lexbuf; token lexbuf }

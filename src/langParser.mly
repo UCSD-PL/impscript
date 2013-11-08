@@ -16,6 +16,7 @@ type parse_stmt = (* TODO attach line info *)
   | PSClose of var list
   | PSExternVal of var * typ
   | PSTcInsert of parse_stmt
+  | PSTyAbbrev of ty_abbrev * (ty_var list * mu_type)
 
 and block = parse_stmt list
 
@@ -26,6 +27,7 @@ let rec stmtOfBlock : block -> stmt = function
   | PSVarInvariant(x,t)::l -> sInvar x t (stmtOfBlock l)
   | PSExternVal(x,t)::l -> sExtern x t (stmtOfBlock l)
   | PSClose(xs)::l -> sClose xs (stmtOfBlock l)
+  | PSTyAbbrev(x,def)::l -> sTyDef x def (stmtOfBlock l)
 
   (* ... a couple simple cases ... *)
   | [] -> sSkip
@@ -49,11 +51,11 @@ let rec stmtOfBlock : block -> stmt = function
 %token <bool> (* BOOL *) VBOOL
 %token <Lang.var> VAR
 %token <Lang.base_type> TBASE
-(* %token <string> TVAR *)
+%token <string> TVAR
 %token
   EOF NULL UNDEF
   IF ELSE COMMA COLON LBRACE RBRACE SEMI LPAREN RPAREN LBRACK RBRACK
-  PIPE FUN RET LETREF EQ EQARROW AS ARROW WHILE DOT
+  PIPE FUN RET LETREF EQ EQARROW AS ARROW WHILE DOT QMARK TYPE
   EXTERN VAL INVARIANT CLOSE FOLD UNFOLD
   TANY TBOT REF DOTS MU
 
@@ -76,10 +78,13 @@ parse_stmt :
  | IF LPAREN e=exp RPAREN LBRACE s1=block RBRACE
    ELSE LBRACE s2=block RBRACE  { PSIf (e,s1,s2) }
  | WHILE LPAREN e=exp RPAREN LBRACE s=block RBRACE { PSWhile(e,s) } 
- | EXTERN VAL x=VAR COLON t=typ { PSExternVal (x,t) }
+ | EXTERN VAL x=VAR COLON t=typ SEMI { PSExternVal (x,t) }
  | INVARIANT x=VAR COLON t=typ SEMI { PSVarInvariant (x,t) }
  | CLOSE LBRACE xs=separated_list(COMMA,VAR) RBRACE SEMI { PSClose xs }
  | LBRACK ps=parse_stmt RBRACK { PSTcInsert ps }
+ | TYPE x=VAR EQ mu=proper_mu_type SEMI { PSTyAbbrev (x, ([], mu)) }
+ | TYPE x=VAR LPAREN ys=separated_list(COMMA,TVAR) RPAREN
+   EQ mu=proper_mu_type SEMI { PSTyAbbrev (x, (ys, mu)) }
 
 base_val :
  | b=VBOOL { VBool b }
@@ -93,7 +98,7 @@ exp_ :
  | v=base_val                          { EBase v }
  | x=VAR                               { EVarRead x }
  | LPAREN s=typ EQARROW t=typ RPAREN   { ECast (s, t) }
- | e=exp AS t=typ                      { EAs (e, Typ t) }
+ | e=exp AS LPAREN t=typ RPAREN        { EAs (e, Typ t) }
 
  | e=exp LPAREN es=separated_list(COMMA,exp) RPAREN { EApp (e, es) }
  | LBRACE l=separated_list(COMMA,field_exp) RBRACE  { EObj l }
@@ -139,13 +144,23 @@ typ :
  | TANY    { TAny }
  | TBOT    { TBot }
  | UNDEF   { tUndef }
+ | NULL    { tNull }
+
  | LPAREN ts=separated_list(COMMA,typ) RPAREN ARROW s=typ { TArrow (ts, s) }
+
  | LPAREN s=typ PIPE ts=separated_list(PIPE,typ) RPAREN { tUnion (s::ts) }
      (* conflicts for union types without parens... *)
 
- | REF mu=mu_type { TRefMu mu }
+ | x=TVAR                         { TVar x }
+ | REF mu=mu_type                 { TRefMu mu }
+ | QMARK LPAREN t=typ RPAREN      { TMaybe t }
 
 mu_type : 
+ | m=proper_mu_type                                 { m }
+ | x=VAR                                            { MuAbbrev (x, []) }
+ | x=VAR LPAREN ts=separated_list(COMMA,typ) RPAREN { MuAbbrev (x, ts) }
+
+proper_mu_type : 
  | x=option(mu_binder) LBRACE fts=separated_list(COMMA,field_type) RBRACE
      { let x = match x with | Some(x) -> x | None -> "_" in
        let (width,fts) =
@@ -156,7 +171,7 @@ mu_type :
        in
        let l = List.filter (fun (f,_) -> f = "...") fts in
        if List.length l > 0 then Log.printParseErr "[...] must appear at end";
-       (x, TRecd (width, fts)) }
+       Mu (x, TRecd (width, fts)) }
 
 field_exp :
  | f=VAR EQ e=exp { (f, e) }
@@ -166,7 +181,7 @@ field_type :
  | DOTS              { ("...", TBot) }
 
 mu_binder :
- | MU x=VAR DOT { x }
+ | MU x=TVAR DOT { x }
 
 exp : e=exp_ { wrapExp e } (* TODO attach line info here... *)
 

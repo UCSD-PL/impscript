@@ -25,6 +25,7 @@ let sIf e s1 s2    = wrapStmt (SIf (e, s1, s2))
 let sWhile e s     = wrapStmt (SWhile (e, s))
 let sLoaded f s    = wrapStmt (SLoadedSrc (f, s))
 let sExtern x t s  = wrapStmt (SExternVal (x, t, s))
+let sTyDef x y s   = wrapStmt (STyAbbrev (x, y, s))
 let sExp e         = wrapStmt (SExp e)
 let sSet e1 e2 e3  = wrapStmt (SObjAssign (e1, e2, e3))
 let sTcInsert s    = wrapStmt (STcInsert s)
@@ -46,9 +47,15 @@ let tBool   = TBase TBool
 let tUndef  = TBase TUndef
 let tNull   = TBase TNull
 
+
 let tUnion ts =
-  let l = List.flatten (List.map (function TUnion(l) -> l | t -> [t]) ts) in
-  TUnion (Utils.removeDupes l)
+  let rec flatten = function
+    | TUnion(ts) -> List.concat (List.map flatten ts)
+    | t          -> [t]
+  in
+  TUnion (Utils.removeDupes (flatten (TUnion ts)))
+    (* instead of just removeDupes, might want to look for
+       equivalent types like reordered unions *)
 
 let ptArrow r tArgs tRet =
   if RelySet.is_empty r then Typ (TArrow (tArgs, tRet))
@@ -57,6 +64,8 @@ let ptArrow r tArgs tRet =
 let isStr = function
   | {exp=EBase(VStr(s))} -> Some s
   | _ -> None
+
+(* might want to include an fT parameter for these mappers *)
 
 let rec mapExp fE fS {exp=e} = {exp = mapExp_ fE fS e}
 
@@ -89,6 +98,7 @@ and mapStmt_ fE fS = function
   | SLoadedSrc(f,s) -> fS (SLoadedSrc (f, mapStmt fE fS s))
   | SExternVal(x,t,s) -> fS (SExternVal (x, t, mapStmt fE fS s))
   | STcInsert(s) -> fS (STcInsert (mapStmt fE fS s))
+  | STyAbbrev(x,def,s) -> fS (STyAbbrev (x, def, mapStmt fE fS s))
   | SObjAssign(e1,e2,e3) ->
       fS (SObjAssign (mapExp fE fS e1, mapExp fE fS e2, mapExp fE fS e3))
 
@@ -98,10 +108,13 @@ let rec mapTyp fT = function
   | TUnion(ts) -> fT (TUnion (List.map (mapTyp fT) ts))
   | TAny -> fT TAny
   | TBot -> fT TBot
+  | TVar(x) -> fT (TVar x)
+  | TMaybe(t) -> fT (TMaybe (mapTyp fT t))
   | TRefLoc(l) -> fT (TRefLoc l)
-  | TRefMu(x,TRecd(width,fts)) ->
+  | TRefMu(MuAbbrev(x,ys)) -> fT (TRefMu (MuAbbrev (x, ys)))
+  | TRefMu(Mu(x,TRecd(width,fts))) ->
       let fts = List.map (fun (f,t) -> (f, mapTyp fT t)) fts in
-      fT (TRefMu (x, TRecd (width, fts)))
+      fT (TRefMu (Mu (x, TRecd (width, fts))))
 
 let rec foldExp fE fS acc {exp=e} =
   foldExp_ fE fS acc e
@@ -183,6 +196,9 @@ and foldStmt_ fE fS acc = function
   | STcInsert(s) ->
       let acc = foldStmt fE fS acc s in
       fS acc (STcInsert s)
+  | STyAbbrev(x,def,s) ->
+      let acc = foldStmt fE fS acc s in
+      fS acc (STyAbbrev (x, def, s))
   | SObjAssign(e1,e2,e3) ->
       let acc = List.fold_left (foldExp fE fS) acc [e1;e2;e3] in
       fS acc (SObjAssign (e1, e2, e3))

@@ -19,7 +19,7 @@ val sub       : (typ * typ) -> bool
 
 val join      : typ -> typ -> typ
 
-val coerce    : (exp * typ * typ) -> (exp, unit) result
+val coerce    : (exp * typ * typ) -> (exp, bool) result
 
 val tcExp     : (TypeEnv.t * HeapEnv.t * exp)
                   -> (exp, pre_type * HeapEnv.t * MoreOut.t) result

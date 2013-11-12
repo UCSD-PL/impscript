@@ -24,6 +24,7 @@ let rec strTyp = function
   | TMaybe(t) -> spr "?(%s)" (strTyp t)
 
 and strRecdTyp (TRecd(width,fields)) =
+  let fields = List.sort compare fields in
   spr "{%s%s}"
     (String.concat ", " (List.map strFieldType fields))
     (match width, fields with

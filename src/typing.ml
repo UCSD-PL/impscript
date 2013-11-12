@@ -1042,6 +1042,8 @@ let removeTcInserts prog =
       | STcInsert({stmt=SVarInvariant(_,_,s)})
       | STcInsert({stmt=SSeq({stmt=SVarAssign _},s)})
       | STcInsert({stmt=SSeq({stmt=SObjAssign _},s)}) -> s.stmt
+      | STcInsert({stmt=SVarAssign _})
+      | STcInsert({stmt=SObjAssign _}) -> sSkip.stmt
       | s -> s)
     prog
 

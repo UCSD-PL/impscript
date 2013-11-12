@@ -1,0 +1,11 @@
+extern val _plus : (num, num) -> num;
+type numlist = mu 'x. {hd: num, tl: ?('x)};
+var sum; sum = function (xs: ?(ref numlist)) -> any {
+  if ([(?(ref numlist) => bool)](xs)) {
+    return 0;
+  } else {
+    xs = (?(ref numlist) => ref numlist)(xs);
+    xs = unfold (numlist, xs);
+    xs.hd = "bad";
+  }
+};

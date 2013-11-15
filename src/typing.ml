@@ -18,12 +18,14 @@ module TypeEnv = struct
 
   type t = { bindings: type_env_binding VarMap.t;
              loc_vars: Vars.t;
-             ty_abbrevs: (ty_var list * mu_type) StrMap.t; }
+             ty_abbrevs: (ty_var list * mu_type) StrMap.t;
+             ret_world: typ * heap; }
 
   let empty : t =
     { bindings = VarMap.empty;
       loc_vars = Vars.empty;
-      ty_abbrevs = StrMap.empty; }
+      ty_abbrevs = StrMap.empty;
+      ret_world = (TBot, []); }
 
   let lookupType : var -> t -> type_env_binding option =
   fun x typeEnv ->
@@ -31,11 +33,13 @@ module TypeEnv = struct
     then Some (VarMap.find x typeEnv.bindings)
     else None
 
-  let lookupRetType : t -> typ =
+  let addRetWorld : (typ * heap) -> t -> t =
+  fun w typeEnv ->
+    { typeEnv with ret_world = w }
+
+  let lookupRetWorld : t -> (typ * heap) =
   fun typeEnv ->
-    match lookupType "@ret" typeEnv with
-      | Some(InvariantRef(t)) -> t
-      | _ -> failwith "lookupRetType"
+    typeEnv.ret_world
 
   let memVar : var -> t -> bool =
   fun x typeEnv ->
@@ -705,7 +709,7 @@ let rec tcExp (typeEnv, heapEnv, exp) = match exp.exp with
 
 and tcBareFun typeEnv heapEnv xs body =
 
-  let typeEnv = TypeEnv.addVar "@ret" (InvariantRef TAny) typeEnv in
+  let typeEnv = TypeEnv.addRetWorld (TAny, []) typeEnv in
   let (typeEnv,heapEnvFun) =
     List.fold_left (fun (acc1,acc2) x ->
       (TypeEnv.addVar x StrongRef acc1, HeapEnv.addVar x (Typ TAny) acc2)
@@ -749,7 +753,7 @@ and tcAnnotatedFun typeEnv heapEnv xs body rely tArgs tRet =
   let origArrow = OpenArrow (rely, tArgs, tRet) in
   if List.length xs <> List.length tArgs
     then failwith "add handling for len(actuals) != len(formals)";
-  let typeEnv = TypeEnv.addVar "@ret" (InvariantRef tRet) typeEnv in
+  let typeEnv = TypeEnv.addRetWorld (tRet, []) typeEnv in
   let (typeEnv,heapEnvFun) =
     List.fold_left (fun (acc1,acc2) (x,t) ->
       (TypeEnv.addVar x StrongRef acc1, HeapEnv.addVar x (Typ t) acc2)
@@ -786,7 +790,7 @@ and tcAnnotatedPolyFun typeEnv heapEnv xs body arrow =
     failwith "add handling for len(actuals) != len(formals)"
   else
     let typeEnv = TypeEnv.addLocVars allLocs typeEnv in
-    let typeEnv = TypeEnv.addVar "@ret" (InvariantRef tRet) typeEnv in
+    let typeEnv = TypeEnv.addRetWorld (tRet, h2) typeEnv in
     let (typeEnv,heapEnvFun) =
       List.fold_left (fun (acc1,acc2) (x,tArg) ->
         let acc1 = TypeEnv.addVar x StrongRef acc1 in
@@ -1046,14 +1050,17 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
             | Exists _ -> assert false
             | OpenArrow _ -> Err (sTcErr "return exp has open type" (sRet e))
             | Typ(t) ->
-                let tExpected = TypeEnv.lookupRetType typeEnv in
+                let (tExpected,hExpected) = TypeEnv.lookupRetWorld typeEnv in
                 run coerceOrFold (true, typeEnv, heapEnv, e, t, tExpected)
                   (fun e -> Err (sRet e))
                   (fun e (heapEnv,out') ->
-                     (* TODO also need to check output world *)
-                     let out = MoreOut.combine out out' in
-                     let out = MoreOut.addRetType t out in
-                     Ok (sRet e, (addExists locs (Typ TBot), heapEnv, out))))
+                     if not (heapSat heapEnv hExpected) then
+                       let err = "expected heap not satisfied" in
+                       Err (sRet (eTcErr err e))
+                     else
+                       let out = MoreOut.combine out out' in
+                       let out = MoreOut.addRetType t out in
+                       Ok (sRet e, (addExists locs (Typ TBot), heapEnv, out))))
 
     (* combination of SVarDecl, SVarAssign, EObj, and SSeq rules in order
        to allocate the object at Lx_%d *)

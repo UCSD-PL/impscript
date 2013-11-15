@@ -4,6 +4,9 @@ open Lang
 let wrapExp e      = { exp = e }
 let eFun xs s      = wrapExp (EFun (xs, s))
 let eStr s         = wrapExp (EBase (VStr s))
+let eBool b        = wrapExp (EBase (VBool b))
+let eInt n         = wrapExp (EBase (VNum (float_of_int n)))
+let eNull          = wrapExp (EBase (VNull))
 let eUndef         = wrapExp (EBase (VUndef))
 let eVar x         = wrapExp (EVarRead x)
 let eApp e es      = wrapExp (EApp (e, es))

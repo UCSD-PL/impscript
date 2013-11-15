@@ -22,3 +22,7 @@ var f; f = function [L] (xs: ?(*L)) / (*L: numlist) -> any / (*L: numlist) {
   [fold (numlist, xs);]
   return xs;
 };
+
+f(null);
+f(null);
+

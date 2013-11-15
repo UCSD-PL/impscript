@@ -424,6 +424,36 @@ fun t ->
         let tx = TRefLoc (LVar x) in
         Some (ePolyCast ([x], [TMaybe tx], [], [], tx, []))
 
+let synthesizeRecd : recd_type -> exp option =
+fun (TRecd(width,fts)) ->
+  let foo = function
+    | TAny          
+    | TBase TNum      -> Some (eInt 0)
+    | TBase TStr      -> Some (eStr "")
+    | TBase TBool     -> Some (eBool true)
+    | TBase TUndef    -> Some eUndef
+    | TBase TNull     -> Some eNull
+    | TMaybe _        -> Some eNull
+    | _               -> None
+  in
+  let maybeObj =
+    List.fold_left (fun acc (f,t) ->
+      match acc, foo t with
+        | Some fes, Some e -> Some ((f, e) :: fes)
+        | _                -> None
+    ) (Some []) fts
+  in
+  match maybeObj with
+    | Some fes -> Some (eObj (List.rev fes))
+    | None     -> None
+
+let synthesizable : TypeEnv.t -> loc_binding -> bool =
+fun typeEnv lb ->
+  let rt = match lb with HRecd rt -> rt | HMu mu -> unrollMu typeEnv mu in
+  match synthesizeRecd rt with
+    | Some _ -> true
+    | None   -> false
+
 let transitiveAssumeVars f heapEnv =
   let rec doOne f acc =
     let acc = Vars.add f acc in
@@ -840,10 +870,12 @@ and tcAppPoly typeEnv heapEnv outFun eFun eArgs arrow =
   match maybeOutput with
    | None -> Err (eApp eFun eArgs)
    | Some(tArgsActual,existentialLocs,heapEnv,out) ->
-       let maybeSubst =
+       (* in addition to a substitution, computes a heap environment in case
+          dummy objects were synthesized for unreachable locations *)
+       let maybeSubstAndHeapEnv =
          List.fold_left (fun acc locVar_i ->
-           ifSome acc (fun subst ->
-             let maybeLocArg =
+           ifSome acc (fun (subst,heapEnv) ->
+             let maybeLocArgAndHeapEnv =
                List.fold_left (fun acc (tArgActual,tArgExpected) ->
                  ifNone acc (fun () ->
                    match tArgActual, tArgExpected with
@@ -851,18 +883,28 @@ and tcAppPoly typeEnv heapEnv outFun eFun eArgs arrow =
                     | TRefLoc l, TMaybe TRefLoc LVar lv
                     | TRefLoc l, TRefLoc LVar lv when lv = locVar_i ->
                         let _ = pr "%s |-> %s\n" locVar_i (strLoc l) in
-                        Some l
-                    | _ -> None)
+                        Some (l, heapEnv)
+                    | TBase TNull, TMaybe TRefLoc LVar lv 
+                      when List.mem_assoc (LVar lv) h1 ->
+                        let lb = List.assoc (LVar lv) h1 in
+                        if not (synthesizable typeEnv lb) then None
+                        else
+                          let lv = genLocVar ~name:"dummy" () in
+                          let heapEnv = HeapEnv.addLoc (LVar lv) lb heapEnv in
+                          Some (LVar lv, heapEnv)
+                    | _ ->
+                        None)
                ) None (List.combine tArgsActual tArgsExpected)
              in
-             match maybeLocArg with
+             match maybeLocArgAndHeapEnv with
               | None -> None
-              | Some locArg_i -> Some (subst @ [(locVar_i,locArg_i)]))
-         ) (Some []) allLocs
+              | Some (locArg_i, heapEnv) ->
+                  Some (subst @ [(locVar_i,locArg_i)], heapEnv))
+         ) (Some ([], heapEnv)) allLocs
        in
-       match maybeSubst with
+       match maybeSubstAndHeapEnv with
         | None -> Err (eTcErr "couldn't infer instantiations" (eApp eFun eArgs))
-        | Some subst ->
+        | Some (subst, heapEnv) ->
             let applySubst = function
               | TRefLoc LVar lv when List.mem_assoc lv subst ->
                   TRefLoc (List.assoc lv subst)

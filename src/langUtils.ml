@@ -8,7 +8,8 @@ let eUndef         = wrapExp (EBase (VUndef))
 let eVar x         = wrapExp (EVarRead x)
 let eApp e es      = wrapExp (EApp (e, es))
 let eAs e t        = wrapExp (EAs (e, t))
-let eCast s t      = wrapExp (ECast (s, t))
+let eCast s t      = wrapExp (ECast ([], [s], [], [], t, []))
+let ePolyCast arr  = wrapExp (ECast arr)
 let eObj l         = wrapExp (EObj l)
 let eGet e1 e2     = wrapExp (EObjRead (e1, e2))
 let eFold mu e     = wrapExp (EFold (mu, e))
@@ -57,8 +58,10 @@ let tUnion ts =
     (* instead of just removeDupes, might want to look for
        equivalent types like reordered unions *)
 
+let pureArrow tArgs tRet = TArrow ([], tArgs, [], [], tRet, [])
+
 let ptArrow r tArgs tRet =
-  if RelySet.is_empty r then Typ (TArrow (tArgs, tRet))
+  if RelySet.is_empty r then Typ (pureArrow tArgs tRet)
   else OpenArrow (r, tArgs, tRet)
 
 let isStr = function
@@ -77,7 +80,7 @@ and mapExp_ fE fS = function
   | EFun(xs,s) -> fE (EFun (xs, mapStmt fE fS s))
   | EApp(e,es) -> fE (EApp (mapExp fE fS e, List.map (mapExp fE fS) es))
   | EAs(e,t) -> fE (EAs (mapExp fE fS e, t))
-  | ECast(s,t) -> fE (ECast (s, t))
+  | ECast(arrow) -> fE (ECast arrow)
   | ETcErr(s,e,so) -> fE (ETcErr (s, mapExp fE fS e, so)) (* skipping so *)
   | ETcInsert(e) -> fE (ETcInsert (mapExp fE fS e))
   | EObj(l) -> fE (EObj (List.map (fun (f,e) -> (f, mapExp fE fS e)) l))
@@ -104,17 +107,22 @@ and mapStmt_ fE fS = function
 
 let rec mapTyp fT = function
   | TBase(bt) -> fT (TBase bt)
-  | TArrow(ts,t) -> fT (TArrow (List.map (mapTyp fT) ts, mapTyp fT t))
+  | TArrow(allLocs,ts,h1,someLocs,t,h2) ->
+      let (ts,t) = (List.map (mapTyp fT) ts, mapTyp fT t) in
+      let (h1,h2) = (mapHeap fT h1, mapHeap fT h2) in
+      fT (TArrow (allLocs, ts, h1, someLocs, t, h2))
   | TUnion(ts) -> fT (TUnion (List.map (mapTyp fT) ts))
   | TAny -> fT TAny
   | TBot -> fT TBot
-  | TVar(x) -> fT (TVar x)
   | TMaybe(t) -> fT (TMaybe (mapTyp fT t))
   | TRefLoc(l) -> fT (TRefLoc l)
-  | TRefMu(MuAbbrev(x,ys)) -> fT (TRefMu (MuAbbrev (x, ys)))
-  | TRefMu(Mu(x,TRecd(width,fts))) ->
-      let fts = List.map (fun (f,t) -> (f, mapTyp fT t)) fts in
-      fT (TRefMu (Mu (x, TRecd (width, fts))))
+  | TExistsRef(l,mu) -> fT (TExistsRef (l, mu)) (* not recursing into mu type *)
+
+and mapHeap fT =
+  List.map (function
+    | (l,HRecd(rt)) -> failwith "mapHeap"
+    | (l,HMu(mu)) -> failwith "mapHeap"
+  )
 
 let rec foldExp fE fS acc {exp=e} =
   foldExp_ fE fS acc e
@@ -136,8 +144,8 @@ and foldExp_ fE fS acc = function
   | EAs(e,t) ->
       let acc = foldExp fE fS acc e
       in fE acc (EAs (e, t))
-  | ECast(s,t) ->
-      fE acc (ECast (s, t))
+  | ECast(arrow) ->
+      fE acc (ECast arrow)
   | ETcErr(s,e,so) ->
       let acc = foldExp fE fS acc e in
       fE acc (ETcErr (s, e, so)) (* skipping so *)

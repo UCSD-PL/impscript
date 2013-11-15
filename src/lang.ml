@@ -3,6 +3,8 @@ type var = string
 
 type ty_abbrev = string
 
+type loc_var = string
+
 type ty_var = string
 
 type field = string
@@ -11,7 +13,7 @@ type width = ExactDomain | UnknownDomain
 
 type loc =
   | LConst of var
-  | LVar of var
+  | LVar of loc_var
 
 type base_type =
   | TInt
@@ -23,21 +25,29 @@ type base_type =
 
 type typ =
   | TBase of base_type
-  | TArrow of typ list * typ
+  | TArrow of arrow
   | TUnion of typ list
   | TAny
   | TBot
-  | TRefMu of mu_type
   | TRefLoc of loc
-  | TVar of ty_var
   | TMaybe of typ
+  | TExistsRef of loc_var * mu_type (* exists *L: 'x. Ref L *)
+
+and arrow = (loc_var list * typ list * heap * loc_var list * typ * heap)
 
 and recd_type =
   | TRecd of width * (field * typ) list
 
 and mu_type =
-  | Mu of ty_var * recd_type
+  | Mu of (ty_var * recd_type)
+  | MuVar of ty_var
   | MuAbbrev of ty_abbrev * typ list
+
+and loc_binding =
+  | HRecd of recd_type
+  | HMu of mu_type
+
+and heap = (loc * loc_binding) list
 
 module RelySet =
   Set.Make (struct type t = (var * typ) let compare = compare end)
@@ -66,7 +76,7 @@ type exp_ =
   | EFold of mu_type * exp
   | EUnfold of mu_type * exp
   | EAs of exp * pre_type
-  | ECast of typ * typ
+  | ECast of arrow
   | ETcErr of string * exp * stmt option (* stmt option for backtracking *)
   | ETcInsert of exp
 

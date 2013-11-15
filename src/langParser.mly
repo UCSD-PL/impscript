@@ -43,6 +43,11 @@ let rec stmtOfBlock : block -> stmt = function
       let (s1,s2) = (stmtOfBlock s1, stmtOfBlock s2) in
       sSeq [sIf e s1 s2; stmtOfBlock l]
 
+let arrowOf inputs outputs =
+  let (allLocs,tArgs,h1) = inputs in
+  let (someLocs,tRet,h2) = outputs in
+  (allLocs, tArgs, h1, someLocs, tRet, h2)
+
 %}
 
 %token <int> INT
@@ -52,12 +57,13 @@ let rec stmtOfBlock : block -> stmt = function
 %token <Lang.var> VAR
 %token <Lang.base_type> TBASE
 %token <string> TVAR
+%token <string> LVAR
 %token
   EOF NULL UNDEF
-  IF ELSE COMMA COLON LBRACE RBRACE SEMI LPAREN RPAREN LBRACK RBRACK
+  IF ELSE COMMA COLON LBRACE RBRACE SEMI LPAREN RPAREN LBRACK RBRACK LT GT
   PIPE FUN RET LETREF EQ EQARROW AS ARROW WHILE DOT QMARK TYPE
   EXTERN VAL INVARIANT CLOSE FOLD UNFOLD
-  TANY TBOT REF DOTS MU
+  TANY TBOT REF DOTS MU STAR SLASH
 
 %type <Lang.stmt> program
 %start program
@@ -97,7 +103,8 @@ base_val :
 exp_ :
  | v=base_val                          { EBase v }
  | x=VAR                               { EVarRead x }
- | LPAREN s=typ EQARROW t=typ RPAREN   { ECast (s, t) }
+ | LPAREN s=typ EQARROW t=typ RPAREN   { (eCast s t).exp }
+ | LPAREN arrow=poly_arrow_cast RPAREN { ECast arrow }
  | e=exp AS LPAREN t=typ RPAREN        { EAs (e, Typ t) }
 
  | e=exp LPAREN es=separated_list(COMMA,exp) RPAREN { EApp (e, es) }
@@ -127,6 +134,13 @@ exp_ :
            (fun acc (x,t) -> RelySet.add (x,t) acc) RelySet.empty r in
        EAs (eFun xs (stmtOfBlock b), ptArrow h tArgs tRet) }
 
+ | FUN LBRACK allLocs=separated_list(COMMA,LVAR) RBRACK
+   LPAREN xts=separated_list(COMMA,annotated_formal) RPAREN SLASH h1=heap
+   tRet=func_ret_type SLASH h2=heap LBRACE b=block RBRACE
+     { let (xs,tArgs) = List.split xts in
+       let arrow = Typ (TArrow (allLocs, tArgs, h1, [], tRet, h2)) in
+       EAs (eFun xs (stmtOfBlock b), arrow) }
+
  | LBRACK e=exp_ RBRACK { ETcInsert (wrapExp e) }
 
 maybe_annotated_formal :
@@ -146,13 +160,18 @@ typ :
  | UNDEF   { tUndef }
  | NULL    { tNull }
 
- | LPAREN ts=separated_list(COMMA,typ) RPAREN ARROW s=typ { TArrow (ts, s) }
+ | LPAREN ts=separated_list(COMMA,typ) RPAREN ARROW s=typ { pureArrow ts s }
+ | arrow=poly_arrow_type                                  { TArrow arrow }
 
  | LPAREN s=typ PIPE ts=separated_list(PIPE,typ) RPAREN { tUnion (s::ts) }
      (* conflicts for union types without parens... *)
 
- | x=TVAR                         { TVar x }
- | REF mu=mu_type                 { TRefMu mu }
+ | x=TVAR                         { TExistsRef ("L", MuVar x) }
+
+ | REF LPAREN l=loc RPAREN        { TRefLoc l }
+ | LT l=loc GT                    { TRefLoc l }
+ | STAR l=loc                     { TRefLoc l }
+
  | QMARK LPAREN t=typ RPAREN      { TMaybe t }
 
 mu_type : 
@@ -182,6 +201,36 @@ field_type :
 
 mu_binder :
  | MU x=TVAR DOT { x }
+
+loc :
+ | x=LVAR { LVar x }
+ (* TODO loc constants *)
+
+heap :
+ | LPAREN h=separated_list(COMMA,heap_binding) RPAREN { h }
+
+heap_binding :
+ | STAR l=loc COLON mu=mu_type { (l, HMu mu) }
+ (* TODO recd *)
+
+poly_arrow_type :
+ | x=poly_arrow_inputs ARROW y=poly_arrow_outputs { arrowOf x y }
+
+poly_arrow_cast :
+ | x=poly_arrow_inputs EQARROW y=poly_arrow_outputs { arrowOf x y }
+
+poly_arrow_inputs :
+ | LBRACK allLocs=separated_list(COMMA,LVAR) RBRACK
+   LPAREN tArgs=separated_list(COMMA,typ) RPAREN
+   ho=option(slash_heap)
+     { let h1 = match ho with None -> [] | Some h -> h in
+       (allLocs, tArgs, h1) }
+
+poly_arrow_outputs :
+ | t=typ { ([], t, []) }
+
+slash_heap :
+ | SLASH h=heap { h }
 
 exp : e=exp_ { wrapExp e } (* TODO attach line info here... *)
 

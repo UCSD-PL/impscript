@@ -5,6 +5,10 @@ open Printer
 
 module StrMap = Utils.StrMap
 
+let ifSome opt f = match opt with Some(x) -> f x | _ -> opt
+
+let ifNone opt f = match opt with None -> f () | _ -> opt
+
 type type_env_binding =
   | Val of typ
   | StrongRef
@@ -63,7 +67,7 @@ end
 
 module HeapEnv = struct
 
-  type t = { vars: pre_type VarMap.t; locs: recd_type LocMap.t; }
+  type t = { vars: pre_type VarMap.t; locs: loc_binding LocMap.t; }
 
   let empty : t =
     { vars = VarMap.empty; locs = LocMap.empty }
@@ -82,11 +86,11 @@ module HeapEnv = struct
   fun x he ->
     { he with vars = VarMap.remove x he.vars }
 
-  let addLoc : loc -> recd_type -> t -> t =
-  fun l rt he ->
-    { he with locs = LocMap.add l rt he.locs }
+  let addLoc : loc -> loc_binding -> t -> t =
+  fun l lb he ->
+    { he with locs = LocMap.add l lb he.locs }
 
-  let lookupLoc : loc -> t -> recd_type option =
+  let lookupLoc : loc -> t -> loc_binding option =
   fun l heapEnv ->
     if LocMap.mem l heapEnv.locs
     then Some (LocMap.find l heapEnv.locs)
@@ -96,10 +100,20 @@ module HeapEnv = struct
   fun l he ->
     { he with locs = LocMap.remove l he.locs }
 
+  let memLoc : loc -> t -> bool =
+  fun l heapEnv ->
+    LocMap.mem l heapEnv.locs
+
   let equal : t -> t -> bool =
   fun he1 he2 ->
     let cmp x y = compare x y = 0 in
     VarMap.equal cmp he1.vars he2.vars && LocMap.equal cmp he1.locs he2.locs
+
+  let strLocs : t -> string =
+  fun he ->
+    let l =
+      LocMap.fold (fun l lb acc -> strHeapBinding (l,lb) :: acc) he.locs [] in
+    spr "(%s)" (commas (List.rev l))
 
 end
 
@@ -126,35 +140,101 @@ module MoreOut = struct
 
 end
 
+let (genLocVar,clearLocVarCounter) =
+  let i = ref 0 in
+  (fun ?(name="") () -> incr i; spr "L%s_%d" name !i),
+  (fun () -> i := 0)
+
 let projTyp = function
   | Typ(t) -> t
   | _ -> failwith "projTyp"
 
-let rec sub = function
-  | s, t when s = t -> true
-  | TBot, _ -> true
-  | _, TAny -> true
-  | s, TUnion ts when List.mem s ts -> true
-  | TBase TNull, TMaybe _
-  | TBase TUndef, TMaybe _ -> true
-  | s, TMaybe t when sub (s, t) -> true
-  | TMaybe s, TMaybe t -> sub (s, t)
+let wellFormed : TypeEnv.t -> typ -> bool =
+fun typeEnv t ->
   (* TODO *)
-  | _ -> false
+  true
 
-and recdSub (TRecd(width1,fts1), TRecd(width2,fts2)) =
+let rec sub_ :
+     (unit -> 'a)    (* success handler for everything but TExistsRef *)
+  -> (unit -> 'a)    (* failure handler *)
+  -> (loc * loc_var * mu_type -> 'a) option (* handler for TExistsRef *)
+  -> typ -> typ -> 'a =
+fun ok bad handlerExistsRef s t ->
+  let recurse = sub_ ok bad handlerExistsRef in
+  match s, t with
+    | s, t when s = t -> ok () 
+    | TBot, _ -> ok ()
+    | _, TAny -> ok ()
+    | s, TUnion ts when List.mem s ts -> ok ()
+    | TBase TNull, TMaybe _
+    | TBase TUndef, TMaybe _ -> ok ()
+    | TRefLoc l, TMaybe TExistsRef (lvar, mu) ->
+        recurse (TRefLoc l) (TExistsRef (lvar, mu))
+    | TMaybe s, TMaybe t -> recurse s t
+    | s, TMaybe t -> recurse s t
+    | TRefLoc l, TExistsRef (lvar, mu) ->
+        (match handlerExistsRef with
+          | Some f -> f (l, lvar, mu)
+          | None -> failwith "sub_: TExistsRef shouldn't be here")
+    | _ -> bad ()   
+
+let sub : typ -> typ -> bool =
+fun s t ->
+  sub_ (fun () -> true) (fun () -> false) None s t
+
+let subAndPack : HeapEnv.t -> typ -> typ -> HeapEnv.t option =
+fun heapEnv ->
+  sub_ (fun () -> Some heapEnv)
+       (fun () -> None)
+       (Some (fun (locWitness, locExists, muExists) ->
+                match HeapEnv.lookupLoc locWitness heapEnv with
+                  | None -> None
+                  | Some HRecd _ -> None
+                  | Some HMu mu ->
+                      if mu = muExists (* TODO more permissive test? *)
+                      then Some (HeapEnv.removeLoc locWitness heapEnv)
+                      else None))
+
+let recdSub_ : ('a -> typ -> typ -> 'a) -> 'a -> 'a
+            -> recd_type -> recd_type -> 'a =
+fun foo initSuccessResult failureResult rt1 rt2 ->
+  let TRecd(width1,fts1) = rt1 in
+  let TRecd(width2,fts2) = rt2 in
+  let keysOk l1 l2 = List.for_all (fun (f,_) -> List.mem_assoc f l1) l2 in
   let widthOkay =
     match width1, width2 with
-      | UnknownDomain, ExactDomain -> false
-      | _, UnknownDomain ->
-          List.for_all (fun (f,_) -> List.mem_assoc f fts1) fts2
-      | ExactDomain, ExactDomain ->
-          List.for_all (fun (f,_) -> List.mem_assoc f fts1) fts2
-          && List.for_all (fun (f,_) -> List.mem_assoc f fts2) fts1
+      | UnknownDomain, ExactDomain   -> false
+      | _,             UnknownDomain -> keysOk fts1 fts2
+      | ExactDomain,   ExactDomain   -> keysOk fts1 fts2 && keysOk fts2 fts1
   in
-  if widthOkay
-  then List.for_all (fun (f,t2) -> sub (List.assoc f fts1, t2)) fts2
-  else false
+  if not widthOkay then failureResult
+  else List.fold_left
+         (fun acc (f,t2) -> let t1 = List.assoc f fts1 in foo acc t1 t2)
+         initSuccessResult fts2
+
+let recdSub =
+  recdSub_ (fun acc s t -> acc && sub s t) true false
+
+let recdSubAndPack heapEnv =
+  recdSub_
+    (fun acc s t -> ifSome acc (fun heapEnv -> subAndPack heapEnv s t))
+    (Some heapEnv) None
+
+let heapSat : HeapEnv.t -> heap -> bool =
+fun heapEnv heap ->
+  List.for_all (fun (l,lb) ->
+    match HeapEnv.lookupLoc l heapEnv, lb with
+      (* TODO more permissive test? *)
+      | Some(HRecd(rt1)), HRecd(rt2) -> rt1 = rt2
+      | Some(HMu(mu1)), HMu(mu2) -> mu1 = mu2
+      | _ -> false
+  ) heap
+
+let removeHeap : HeapEnv.t -> heap -> HeapEnv.t =
+  List.fold_left (fun acc (l,_) -> HeapEnv.removeLoc l acc)
+
+let addHeap : HeapEnv.t -> heap -> HeapEnv.t =
+  List.fold_left (fun acc (l,lb) -> HeapEnv.addLoc l lb acc)
 
 let rec join s t = match s, t with
   | s, t when s = t -> s
@@ -217,19 +297,21 @@ let joinHeapEnvs : HeapEnv.t -> HeapEnv.t -> HeapEnv.t =
     ) he1 VarMap.empty
   in
   let joinLocs he1 he2 =
-    LocMap.fold (fun l rt1 acc ->
+    LocMap.fold (fun l x acc ->
       if not (LocMap.mem l he2) then acc
-      else let rt2 = LocMap.find l he2 in
-           LocMap.add l (joinRecdTypes rt1 rt2) acc
+      else
+        match x, LocMap.find l he2 with
+          | HRecd(rt1), HRecd(rt2) ->
+              LocMap.add l (HRecd (joinRecdTypes rt1 rt2)) acc
+          | x, y when x = y ->
+              LocMap.add l x acc
+          | _ ->
+              failwith "joinLocs"
     ) he1 LocMap.empty
   in
   fun he1 he2 ->
     { HeapEnv.vars = joinVars he1.HeapEnv.vars he2.HeapEnv.vars;
       HeapEnv.locs = joinLocs he1.HeapEnv.locs he2.HeapEnv.locs; }
-
-let genLocVar =
-  let i = ref 0 in
-  (fun ?(name="") () -> incr i; spr "L%s_%d" name !i)
 
 let isLambda exp = match exp.exp with
   | EFun _ | EAs({exp=EFun _},_) -> true
@@ -276,40 +358,71 @@ let removeLocsFromType : typ -> typ =
 fun t ->
   mapTyp (function TRefLoc _ -> TAny | s -> s) t
 
-let unrollProperMu : mu_type -> (var * recd_type) -> recd_type =
+let unrollMuDef : mu_type -> (var * recd_type) -> recd_type =
 fun mu -> function
   | "_", rt -> rt
   | x, TRecd(width,fts) ->
-      let foo = mapTyp (function TVar(y) when x = y -> TRefMu mu | t -> t) in
+      let foo =
+        mapTyp (function
+                 | TExistsRef(l,MuVar(y)) when x = y -> TExistsRef (l, mu)
+                 | t -> t) in
       let fts = List.map (fun (f, t) -> (f, foo t)) fts in
       TRecd (width, fts)
 
 let unrollMu : TypeEnv.t -> mu_type -> recd_type =
 fun typeEnv mu ->
   match mu with
-    | Mu(x,rt) -> unrollProperMu mu (x,rt)
+    | Mu(x,rt) -> unrollMuDef mu (x,rt)
     | MuAbbrev(t,[]) ->
         (match TypeEnv.lookupTyAbbrev t typeEnv with
-          | Some([],Mu(x,rt)) -> unrollProperMu mu (x,rt)
+          | Some([],Mu(x,rt)) -> unrollMuDef mu (x,rt)
           | None -> failwith "unrollMu 1"
           | _ -> failwith "unrollMu 2")
     | MuAbbrev _ -> failwith "unrollMu with type args"
+    | MuVar _ -> failwith "unrollMu: var wasn't substituted"
 
-let castToMu : typ -> mu_type option =
+let pack : TypeEnv.t -> HeapEnv.t -> loc -> recd_type -> mu_type
+        -> HeapEnv.t option =
+fun typeEnv heapEnv l rt mu ->
+  let rtGoal = unrollMu typeEnv mu in
+  ifSome (recdSubAndPack heapEnv rt rtGoal)
+    (fun heapEnv -> Some (HeapEnv.addLoc l (HMu mu) heapEnv))
+    (* recdSubAndPack removed witnesses, so now just fold the top loc *)
+
+let eagerUnpack : recd_type -> (loc_var list * recd_type) =
+fun (TRecd(width,fts)) ->
+  let existentialLocs = ref [] in
+  let foo = function
+    | TExistsRef(l,mu) ->
+        let l = genLocVar () in
+        let _ = existentialLocs := l :: !existentialLocs in
+        TRefLoc (LVar l)
+    | t -> t
+  in
+  let fts = List.map (fun (f,t) -> (f, mapTyp foo t)) fts in
+  (List.rev !existentialLocs, TRecd (width, fts))
+
+let singleRefOf : typ -> loc option =
+function
+  | TMaybe(TRefLoc(l)) -> Some l
+  | TUnion(ts) ->
+      let ls =
+        List.fold_left
+          (fun acc -> function TRefLoc(l) -> l :: acc | _ -> acc) [] ts in
+      (match ls with
+        | [l] -> Some l
+        | []  -> None
+        | _   -> None) (* don't want unions with multiple ref types *)
+  | _ -> None
+
+let refCast : typ -> exp option =
 fun t ->
-  let default = Mu ("_", TRecd (UnknownDomain, [])) in
-  match t with
-    | TMaybe(TRefMu(mu)) -> Some mu
-    | TUnion(ts) ->
-        let mus =
-          List.fold_left
-            (fun acc -> function TRefMu(mu) -> mu :: acc | _ -> acc) [] ts in
-        (match mus with
-           | [mu] -> Some mu
-           | []   -> Some default
-           | _    -> None) (* don't want unions with multiple object types *)
-    | _ ->
-        Some default
+  match singleRefOf t with
+    | None -> None
+    | Some _ ->
+        let x = "L_" in
+        let tx = TRefLoc (LVar x) in
+        Some (ePolyCast ([x], [TMaybe tx], [], [], tx, []))
 
 let transitiveAssumeVars f heapEnv =
   let rec doOne f acc =
@@ -380,7 +493,7 @@ let compatible s t = match s, t with
 
 let coerce (e, s, t) =
   let (s1,s2) = (strTyp s, strTyp t) in
-  if sub (s, t) then
+  if sub s t then
     Ok (e, false)
   else if not !Settings.castInsertionMode then
     Err (eTcErr (spr "not a subtype:\n%s\n%s" s1 s2) e)
@@ -415,37 +528,17 @@ let rec tcExp (typeEnv, heapEnv, exp) = match exp.exp with
   | EFun(xs,body) ->
       tcBareFun typeEnv heapEnv xs body
 
-  | EAs({exp=EFun(xs,body)},Typ(TArrow(tArgs,tRet))) ->
+  | EAs({exp=EFun(xs,body)},Typ(TArrow([],tArgs,[],[],tRet,[]))) ->
       tcAnnotatedFun typeEnv heapEnv xs body RelySet.empty tArgs tRet
 
   | EAs({exp=EFun(xs,body)},OpenArrow(r,tArgs,tRet)) ->
       tcAnnotatedFun typeEnv heapEnv xs body r tArgs tRet
 
-  | EApp({exp=ECast((TRefMu(mu) as s),((TRefMu(mu')) as t))},[e]) ->
-      (* TODO *)
-      (match mu, mu' with
-        | Mu("_",rt), Mu("_",rt') ->
-            run tcExp (typeEnv, heapEnv, e)
-              (fun e -> Err (eApp (eCast s t) [e]))
-              (fun e (pt,heapEnv,out) ->
-                 match pt with
-                  | Typ(TRefLoc(l)) ->
-                      let cast = eApp (eCast s t) [e] in
-                      (match HeapEnv.lookupLoc l heapEnv with
-                        | Some(rt0) when rt = rt0 ->
-                            let heapEnv = HeapEnv.addLoc l rt' heapEnv in
-                            Ok (cast, (Typ tUndef, heapEnv, out))
-                        | _ ->
-                            Err (eTcErr "app-cast error" cast))
-                  | _ ->
-                      Err (eTcErr "app-cast error" (eApp (eCast s t) [e])))
-        | Mu _, Mu _ ->
-            failwith "TODO cast between mu types"
-        | _ ->
-            failwith "TODO cast involving abbrevs")
+  | EAs({exp=EFun(xs,body)},Typ(TArrow(arrow))) ->
+      tcAnnotatedPolyFun typeEnv heapEnv xs body arrow
 
-  | ECast(s,t) ->
-      Ok (exp, (Typ (TArrow ([s], t)), heapEnv, MoreOut.empty))
+  | ECast(arrow) ->
+      Ok (exp, (Typ (TArrow arrow), heapEnv, MoreOut.empty))
 
   | EApp(eFun,eArgs) ->
       run tcExp (typeEnv, heapEnv, eFun)
@@ -464,8 +557,10 @@ let rec tcExp (typeEnv, heapEnv, exp) = match exp.exp with
                       Err (eApp (eTcErrRetry err eFun sRetry) eArgs)
                   | _ -> 
                       Err (eApp (eTcErr err eFun) eArgs))
-            | Typ(TArrow(tArgs,tRet)) ->
+            | Typ(TArrow([],tArgs,[],[],tRet,[])) ->
                 tcApp1 typeEnv heapEnv outFun eFun eArgs tArgs tRet
+            | Typ(TArrow(arrow)) ->
+                tcAppPoly typeEnv heapEnv outFun eFun eArgs arrow
             | Typ(tFun) ->
                 tcApp2 typeEnv heapEnv outFun eFun eArgs tFun)
 
@@ -480,7 +575,7 @@ let rec tcExp (typeEnv, heapEnv, exp) = match exp.exp with
             | Typ(TRefLoc(l)), Some(f) ->
                 (match HeapEnv.lookupLoc l heapEnv with
                   | None -> Err (eGet (eTcErr "not in heap" e1) e2)
-                  | Some(rt) ->
+                  | Some(HRecd(rt)) ->
                       (match findInRecdType f rt with
                         | Bound(tf) ->
                             Ok (eGet e1 e2, (Typ tf, heapEnv, out))
@@ -491,23 +586,27 @@ let rec tcExp (typeEnv, heapEnv, exp) = match exp.exp with
                         | MaybeBound ->
                             if !Settings.strictObjGet
                             then Err (eTcErr "field not found" (eGet e1 e2))
-                            else Ok (eGet e1 e2, (Typ TAny, heapEnv, out))))
-            | Typ(TRefMu(mu)), Some(f) ->
-                let err = "trying to read from mu type" in
-                (match lvalOf e1 with
-                  | Some(lv) ->
-                      let sRetry = sAssignLval lv (eUnfold mu (eLval lv)) in
-                      Err (eGet (eTcErrRetry err e1 sRetry) e2)
-                  | _ ->
-                      Err (eGet (eTcErr err e1) e2))
+                            else Ok (eGet e1 e2, (Typ TAny, heapEnv, out)))
+                  | Some(HMu(Mu _ as mu))
+                  | Some(HMu(MuAbbrev _ as mu)) ->
+                      let err = spr "need to unfold: %s" (strMu mu) in
+                      (match lvalOf e1 with
+                        | Some(lv) ->
+                            (* let sRetry = sAssignLval lv (eUnfold mu (eLval lv)) in *)
+                            let sRetry = sExp (eUnfold mu (eLval lv)) in
+                            Err (eGet (eTcErrRetry err e1 sRetry) e2)
+                        | _ ->
+                            Err (eGet (eTcErr err e1) e2))
+                  | Some(HMu(MuVar _)) ->
+                      failwith "tc EObjRead: mu var wasn't unrolled?")
             | Typ(t), _ ->
-                let err = spr "object type isn't strong:\n %s" (strTyp t) in
-                (match lvalOf e1, castToMu t with
-                  | Some(lv), Some(mu) ->
-                      let cast = eCast t (TRefMu mu) in
+                let err = spr "not a ref type: %s" (strTyp t) in
+                (match lvalOf e1, refCast t with
+                  | Some(lv), Some(cast) ->
                       let sRetry = sAssignLval lv (eApp cast [eLval lv]) in
                       Err (eGet (eTcErrRetry err e1 sRetry) e2)
-                  | _, _ ->
+                  (* could add this case: | None, Some(cast) -> *)
+                  | _ ->
                       Err (eGet (eTcErr err e1) e2))
             | _, None ->
                 Err (eTcErr "dynamic key lookup" (eGet e1 e2))
@@ -524,35 +623,44 @@ let rec tcExp (typeEnv, heapEnv, exp) = match exp.exp with
             | Typ(TRefLoc(l)) ->
                 (match HeapEnv.lookupLoc l heapEnv with
                   | None -> Err (eFold mu (eTcErr "not in heap" e))
-                  | Some(rt') ->
-                      let rt = unrollMu typeEnv mu in
-                      if recdSub (rt', rt) then
-                        let heapEnv = HeapEnv.removeLoc l heapEnv in
-                        let tPtr = addExists locs (Typ (TRefMu mu)) in
-                        Ok (eFold mu e, (tPtr, heapEnv, out))
-                      else
-                        let (s1,s2) = (strRecdTyp rt', strRecdTyp rt) in
-                        let sErr = spr "bad recd subtyping\n %s\n %s\n" s1 s2 in
-                        Err (eFold mu (eTcErr sErr e)))
+                  | Some(HMu _) -> Err (eFold mu (eTcErr "not recd type" e))
+                  | Some(HRecd(rt)) ->
+                      (match pack typeEnv heapEnv l rt mu with
+                        | Some(heapEnv) ->
+                            Ok (eFold mu e, (addExists locs pt, heapEnv, out))
+                        | None ->
+                            let err = spr "can't pack:\n\n %s\n\n %s\n\n"
+                              (strRecdType rt)
+                              (strRecdType (unrollMu typeEnv mu)) in
+                            Err (eFold mu (eTcErr err e))))
             | _ ->
-                let err = spr "object isn't strong:\n%s\n" (strPreTyp pt) in
+                let err = spr "not a reference type:\n%s\n" (strPreTyp pt) in
                 Err (eFold mu (eTcErr err e)))
 
   | EUnfold(mu,e) ->
       run tcExp (typeEnv, heapEnv, e)
         (fun e -> Err (eUnfold mu e))
         (fun e (pt,heapEnv,out) ->
+           let (locs,pt) = stripExists pt in
            match pt with
-            | Typ(TRefMu(mu')) when mu <> mu' ->
-                Err (eTcErr "mu annotation doesn't match" (eUnfold mu e))
-            | Typ(TRefMu _ ) ->
-                let locObj = genLocVar () in
-                let rt = unrollMu typeEnv mu in
-                let heapEnv = HeapEnv.addLoc (LVar locObj) rt heapEnv in
-                let ptr = Typ (TRefLoc (LVar locObj)) in
-                Ok (eUnfold mu e, (Exists (locObj, ptr), heapEnv, out))
+            | Typ(TRefLoc(l)) ->
+                (match HeapEnv.lookupLoc l heapEnv with
+                  | None -> Err (eUnfold mu (eTcErr "not in heap" e))
+                  | Some(HRecd _) -> Err (eUnfold mu (eTcErr "not mu-type" e))
+                  | Some(HMu(mu)) ->
+                      let rt = unrollMu typeEnv mu in
+                      let (existentialLocs,rt) = eagerUnpack rt in
+                      let pt = addExists (locs @ existentialLocs) pt in
+                      let heapEnv = HeapEnv.addLoc l (HRecd rt) heapEnv in
+                      let heapEnv =
+                        List.fold_left
+                          (fun acc li -> HeapEnv.addLoc (LVar li) (HMu mu) acc)
+                          heapEnv existentialLocs
+                      in
+                      Ok (eUnfold mu e, (pt, heapEnv, out)))
             | _ ->
-                Err (eUnfold mu (eTcErr "object isn't mu type" e)))
+                let err = spr "not a reference type:\n%s\n" (strPreTyp pt) in
+                Err (eUnfold mu (eTcErr err e)))
 
   | ETcInsert(e) ->
       run tcExp (typeEnv, heapEnv, e)
@@ -582,7 +690,7 @@ and tcBareFun typeEnv heapEnv xs body =
         | Exists _ -> failwith "tcBareFun exists"
         | Typ(t) -> (RelySet.add (x,t) acc1, HeapEnv.addVar x (Typ t) acc2)
         | OpenArrow(_,tArgs,tRet) ->
-            let tArrow = TArrow (tArgs, tRet) in
+            let tArrow = pureArrow tArgs tRet in
             (RelySet.add (x,tArrow) acc1, HeapEnv.addVar x (Typ tArrow) acc2)
     ) heapEnv.HeapEnv.vars (RelySet.empty, heapEnvFun) in
 
@@ -606,6 +714,7 @@ and tcBareFun typeEnv heapEnv xs body =
             let out = { out with MoreOut.retTypes = Types.empty } in
             Ok (eAs (eFun xs body) arrow, (arrow, heapEnv, out)))
 
+(* simpler version of tcAnnotatedFunPoly for pure arrows *)
 and tcAnnotatedFun typeEnv heapEnv xs body rely tArgs tRet =
   let origArrow = OpenArrow (rely, tArgs, tRet) in
   if List.length xs <> List.length tArgs
@@ -630,12 +739,60 @@ and tcAnnotatedFun typeEnv heapEnv xs body rely tArgs tRet =
             Err (eAs (eFun xs (sTcErr err body)) origArrow)
         | Typ(tBody) ->
             let arrow = ptArrow rely tArgs tRet in
-            if sub (tBody, tRet) then
+            if sub tBody tRet then
               Ok (eAs (eFun xs body) arrow, (arrow, heapEnv, MoreOut.empty))
             else
               let err = "fun has bad fall-thru type" in
               Err (eAs (eFun xs (sTcErr err body)) origArrow))
 
+and tcAnnotatedPolyFun typeEnv heapEnv xs body arrow =
+  let (allLocs,tArgs,h1,someLocs,tRet,h2) = arrow in
+  if someLocs <> [] then failwith "tcAnnotatedPolyFun someLocs";
+  let tArrow = TArrow arrow in
+  let ptArrow = Typ tArrow in
+  if not (wellFormed typeEnv tArrow) then
+    Err (eTcErr "arrow not well-formed" (eAs (eFun xs body) ptArrow))
+  else if List.length xs != List.length tArgs then
+    failwith "add handling for len(actuals) != len(formals)"
+  else
+    let typeEnv = TypeEnv.addLocVars allLocs typeEnv in
+    let typeEnv = TypeEnv.addVar "@ret" (InvariantRef tRet) typeEnv in
+    let (typeEnv,heapEnvFun) =
+      List.fold_left (fun (acc1,acc2) (x,tArg) ->
+        let acc1 = TypeEnv.addVar x StrongRef acc1 in
+        let acc2 = HeapEnv.addVar x (Typ tArg) acc2 in
+        (acc1, acc2)
+      ) (typeEnv, HeapEnv.empty) (List.combine xs tArgs)
+    in
+    let heapEnvFun =
+      List.fold_left (fun acc (l,lb) ->
+        if HeapEnv.memLoc l acc
+        then failwith "tcAnnotatedPolyFun: loc already bound"
+        else HeapEnv.addLoc l lb acc
+      ) heapEnvFun h1
+    in
+    run tcStmt (typeEnv, heapEnvFun, body)
+      (fun body -> Err (eAs (eFun xs body) ptArrow))
+      (fun body (pt,heapEnvFunOut,_) ->
+         let (locs,pt) = stripExists pt in
+         match pt with
+          | Typ(tBody) ->
+              (* will need to deal with someLocs and locs here *)
+              if not (sub tBody tRet) then
+                let err = "bad fall-thru type" in
+                Err (eAs (eFun xs (sTcErr err body)) ptArrow)
+              else if not (heapSat heapEnvFunOut h2) then
+                let err = spr "bad fall-thru heap environment:\n\n%s\n\n%s\n\n"
+                  (HeapEnv.strLocs heapEnvFunOut) (strHeap h2) in
+                Err (eAs (eFun xs (sTcErr err body)) ptArrow)
+              else
+                let stuff = (ptArrow, heapEnv, MoreOut.empty) in
+                Ok (eAs (eFun xs body) ptArrow, stuff)
+          | _ ->
+              let err = "type of body is open" in
+              Err (eAs (eFun xs (sTcErr err body)) ptArrow))
+
+(* could rely on tcAppPoly for simple arrows, but tcApp1 is more direct *)
 and tcApp1 typeEnv heapEnv outFun eFun eArgs tArgs tRet =
   if List.length eArgs <> List.length tArgs
     then failwith "add handling for len(actuals) != len(formals)";
@@ -657,9 +814,94 @@ and tcApp1 typeEnv heapEnv outFun eFun eArgs tArgs tRet =
     | Some(heapEnv,out) ->
         Ok (eApp eFun eArgs, (Typ tRet, heapEnv, out)))
 
+and tcAppPoly typeEnv heapEnv outFun eFun eArgs arrow =
+  let (allLocs,tArgsExpected,h1,someLocs,tRet,h2) = arrow in
+  if someLocs <> [] then failwith "tcAppPoly: someLocs TODO";
+  let (eArgs,maybeOutput) =
+    List.fold_left (fun (eArgs,maybeOutput) eArg ->
+      match maybeOutput with
+       | None -> (eArgs @ [eArg], None)
+       | Some(tArgsActual,existentialLocs,heapEnv,out) ->
+           run tcExp (typeEnv, heapEnv, eArg)
+             (fun eArg -> (eArgs @ [eArg], None))
+             (fun eArg (ptActual,heapEnv,out') ->
+                let (locs,ptActual) = stripExists ptActual in
+                match ptActual with
+                 | Typ(tActual) ->
+                     let tArgsActual = tArgsActual @ [tActual] in
+                     let existentialLocs = existentialLocs @ locs in
+                     let out = MoreOut.combine out out' in
+                     let stuff = (tArgsActual, existentialLocs, heapEnv, out) in
+                     (eArgs @ [eArg], Some stuff)
+                 | _ ->
+                     (eArgs @ [eArg], None))
+    ) ([], Some ([], [], heapEnv, outFun)) eArgs
+  in
+  match maybeOutput with
+   | None -> Err (eApp eFun eArgs)
+   | Some(tArgsActual,existentialLocs,heapEnv,out) ->
+       let maybeSubst =
+         List.fold_left (fun acc locVar_i ->
+           ifSome acc (fun subst ->
+             let maybeLocArg =
+               List.fold_left (fun acc (tArgActual,tArgExpected) ->
+                 ifNone acc (fun () ->
+                   match tArgActual, tArgExpected with
+                    | TMaybe TRefLoc l, TMaybe TRefLoc LVar lv
+                    | TRefLoc l, TMaybe TRefLoc LVar lv
+                    | TRefLoc l, TRefLoc LVar lv when lv = locVar_i ->
+                        let _ = pr "%s |-> %s\n" locVar_i (strLoc l) in
+                        Some l
+                    | _ -> None)
+               ) None (List.combine tArgsActual tArgsExpected)
+             in
+             match maybeLocArg with
+              | None -> None
+              | Some locArg_i -> Some (subst @ [(locVar_i,locArg_i)]))
+         ) (Some []) allLocs
+       in
+       match maybeSubst with
+        | None -> Err (eTcErr "couldn't infer instantiations" (eApp eFun eArgs))
+        | Some subst ->
+            let applySubst = function
+              | TRefLoc LVar lv when List.mem_assoc lv subst ->
+                  TRefLoc (List.assoc lv subst)
+              | t -> t in
+            let applySubstToHeap =
+              List.map (fun (l,lb) ->
+                let l =
+                  match l with
+                   | LVar lv when List.mem_assoc lv subst -> List.assoc lv subst
+                   | _ -> l
+                in (l, lb) (* TODO need to recurse into bindings? *)
+              ) in
+            let tArgsExpected = List.map (mapTyp applySubst) tArgsExpected in
+            let obligations = List.combine tArgsActual tArgsExpected in
+            let (eArgs,allOk) =
+              List.fold_left (fun (eArgs,acc) (eArg,(tActual,tExpected)) ->
+                if acc = false then (eArgs @ [eArg], false)
+                else if sub tActual tExpected then (eArgs @ [eArg], true)
+                else let (s1,s2) = (strTyp tActual, strTyp tExpected) in
+                     let err = spr "not subtype:\n%s\n%s\n" s1 s2 in
+                     (eArgs @ [eTcErr err eArg], false)
+              ) ([], true) (List.combine eArgs obligations)
+            in
+            let (h1,h2) = (applySubstToHeap h1, applySubstToHeap h2) in
+            if not allOk then
+              Err (eApp eFun eArgs)
+            else if not (heapSat heapEnv h1) then
+              let err = "input heap not satisfied" in
+              Err (eTcErr err (eApp eFun eArgs))
+            else
+              let heapEnv = removeHeap heapEnv h1 in
+              let heapEnv = addHeap heapEnv h2 in
+              let tRet = mapTyp applySubst tRet in 
+              let ptRet = addExists existentialLocs (Typ tRet) in
+              Ok (eApp eFun eArgs, (ptRet, heapEnv, out))
+
 and tcApp2 typeEnv heapEnv outFun eFun eArgs tFun =
   let tAnys = List.map (function _ -> TAny) eArgs in
-  run coerce (eFun, tFun, TArrow (tAnys, TAny))
+  run coerce (eFun, tFun, pureArrow tAnys TAny)
     (fun eFun -> Err (eApp eFun eArgs))
     (fun eFun _ ->
        let (eArgs,maybeOutput) =
@@ -706,7 +948,7 @@ and tcObjLit typeEnv heapEnv locObj fieldExps =
         let tRecd = TRecd (ExactDomain, fieldTypes) in
         let tPtr = Typ (TRefLoc (LVar locObj)) in
         let ptPtr = addExists (existentials @ [locObj]) tPtr in
-        let heapEnv = HeapEnv.addLoc (LVar locObj) tRecd heapEnv in
+        let heapEnv = HeapEnv.addLoc (LVar locObj) (HRecd tRecd) heapEnv in
         Ok (obj, (ptPtr, heapEnv, out))
   end
 
@@ -749,7 +991,7 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
   | SExp(e) ->
       run tcExp (typeEnv, heapEnv, e)
         (fun e -> Err (sExp e))
-        (fun e (pt,heapEnv,out) -> Ok (sExp e, (pt, heapEnv, out)))
+        (fun e (_,heapEnv,out) -> Ok (sExp e, (Typ tUndef, heapEnv, out)))
 
   | SReturn(e) ->
       (* not just calling tcCoerce, because want to add synthesized
@@ -766,6 +1008,7 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
                 run coerceOrFold (true, typeEnv, heapEnv, e, t, tExpected)
                   (fun e -> Err (sRet e))
                   (fun e (heapEnv,out') ->
+                     (* TODO also need to check output world *)
                      let out = MoreOut.combine out out' in
                      let out = MoreOut.addRetType t out in
                      Ok (sRet e, (addExists locs (Typ TBot), heapEnv, out))))
@@ -879,7 +1122,7 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
         | Some(OpenArrow _) -> failwith "varinvar open"
         | Some(Exists _) -> failwith "varinvar exists"
         | Some(Typ(tCurrentX)) ->
-            if not (sub (tCurrentX, tGoalX)) then
+            if not (sub tCurrentX tGoalX) then
               (* could allow coercion in the bad case instead *)
               let str = spr "varinvariant var [%s]: bad subtyping" x in
               Err (sInvar x tGoalX (sTcErr str s))
@@ -899,7 +1142,7 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
                (match HeapEnv.lookupVar x heapEnv with
                  | Some(OpenArrow(r,tArgs,tRet)) ->
                      let accR = RelySet.union accR r in
-                     let accG = RelySet.add (x, TArrow (tArgs, tRet)) accG in
+                     let accG = RelySet.add (x, pureArrow tArgs tRet) accG in
                      (accR, accG)
                  | Some(Typ _)
                  | Some(Exists _) -> failwith (spr "[%s] is not open func" x)
@@ -928,11 +1171,22 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
             | Typ(TRefLoc(l)), Some(f), Typ(t3) ->
                 (match HeapEnv.lookupLoc l heapEnv with
                   | None -> Err (sSet (eTcErr "not in heap" e1) e2 e3)
-                  | Some(rt) ->
+                  | Some(HRecd(rt)) ->
                       let rt' = TRecd (ExactDomain, [(f,t3)]) in
                       let rt = extendRecdType rt rt' in
-                      let heapEnv = HeapEnv.addLoc l rt heapEnv in
-                      Ok (sSet e1 e2 e3, (addExists locs3 (Typ t3), heapEnv, out)))
+                      let heapEnv = HeapEnv.addLoc l (HRecd rt) heapEnv in
+                      Ok (sSet e1 e2 e3, (addExists locs3 (Typ t3), heapEnv, out))
+                  | Some(HMu(Mu _ as mu))
+                  | Some(HMu(MuAbbrev _ as mu)) ->
+                      let err = spr "need to unfold: %s" (strMu mu) in
+                      (match lvalOf e1 with
+                        | Some(lv) ->
+                            let sRetry = sExp (eUnfold mu (eLval lv)) in
+                            Err (sSet (eTcErrRetry err e1 sRetry) e2 e3)
+                        | _ ->
+                            Err (sSet (eTcErr err e1) e2 e3))
+                  | Some(HMu(MuVar _)) ->
+                      failwith "tc EObjAssign: mu var wasn't expanded?")
             | _, None, _ ->
                 Err (sSet e1 (eTcErr "dynamic key" e2) e3)
             | _, _, OpenArrow _ ->
@@ -1009,9 +1263,10 @@ and coerceOrFold (hoistCasts, typeEnv, heapEnv, e, t, tGoal) =
   run coerce (e, t, tGoal)
     (fun eErr ->
        match t, tGoal, hoistCasts, lvalOf e with
+        (* TODO
         | TRefLoc _, TMaybe(TRefMu(mu)), true, Some(lv)
         | TRefLoc _, TRefMu(mu), true, Some(lv) ->
-            let sRetry = sAssignLval lv (eFold mu (eLval lv)) in
+            let sRetry = sExp lv (eFold mu (eLval lv)) in
             Err (eTcErrRetry "blah" e sRetry)
         | TRefLoc _, TMaybe(TRefMu(mu)), _, _
         | TRefLoc _, TRefMu(mu), _, _ ->
@@ -1019,6 +1274,7 @@ and coerceOrFold (hoistCasts, typeEnv, heapEnv, e, t, tGoal) =
               (fun _ -> Err e)
               (fun _ (_,heapEnv,out) ->
                  Ok (eTcInsert (eFold mu e), (heapEnv, out)))
+        *)
         | _ ->
             Err eErr)
     (fun eOk insertedCast ->
@@ -1040,14 +1296,17 @@ let removeTcInserts prog =
     (function
       | STcInsert({stmt=SClose(_,s)})
       | STcInsert({stmt=SVarInvariant(_,_,s)})
+      | STcInsert({stmt=SSeq({stmt=SExp _},s)})
       | STcInsert({stmt=SSeq({stmt=SVarAssign _},s)})
       | STcInsert({stmt=SSeq({stmt=SObjAssign _},s)}) -> s.stmt
+      | STcInsert({stmt=SExp _})
       | STcInsert({stmt=SVarAssign _})
       | STcInsert({stmt=SObjAssign _}) -> sSkip.stmt
       | s -> s)
     prog
 
 let typecheck prog =
+  clearLocVarCounter ();
   let prog =
     if !Settings.castInsertionMode
     then removeTcInserts prog (* remove [...] expressions and statements *)

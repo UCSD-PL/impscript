@@ -1,6 +1,8 @@
 
 open Lang
 
+let commas = String.concat ", "
+
 let strLoc = function
   | LConst(x) -> x
   | LVar(x) -> x
@@ -14,43 +16,63 @@ let rec strTyp = function
   | TBase(TNull) -> "null"
   | TAny -> "any"
   | TBot -> "bot"
-  | TArrow(ts,t) ->
-      spr "(%s) -> %s" (String.concat ", " (List.map strTyp ts)) (strTyp t)
+  | TArrow([],ts,[],[],t,[]) ->
+      spr "(%s) -> %s" (commas (List.map strTyp ts)) (strTyp t)
+  | TArrow(arrow) -> strArrow arrow "->"
   | TUnion(ts) ->
       spr "(%s)" (String.concat " | " (List.map strTyp ts))
-  | TRefMu(mu) -> spr "ref %s" (strMu mu)
-  | TRefLoc(l) -> spr "ref(%s)" (strLoc l)
-  | TVar(x) -> x
+  (* | TRefLoc(l) -> spr "ref(%s)" (strLoc l) *)
+  (* | TRefLoc(l) -> spr "<%s>" (strLoc l) *)
+  | TRefLoc(l) -> spr "*%s" (strLoc l)
+  | TExistsRef("L",MuVar(x)) -> x
+  | TExistsRef(l,mu) -> spr "exists *%s: %s. ref %s" l (strMu mu) l
   | TMaybe(t) -> spr "?(%s)" (strTyp t)
 
-and strRecdTyp (TRecd(width,fields)) =
+and strArrow (allLocs,tArgs,h1,someLocs,tRet,h2) arrowSymbol =
+  spr "[%s] (%s)%s %s %s%s%s"
+    (commas allLocs)
+    (commas (List.map strTyp tArgs))
+    (if h1 = [] then "" else spr " / %s" (strHeap h1))
+    arrowSymbol
+    (if someLocs = [] then "" else spr "[%s] " (commas someLocs))
+    (strTyp tRet)
+    (if h2 = [] then "" else spr " / %s" (strHeap h2))
+
+and strRecdType (TRecd(width,fields)) =
   let fields = List.sort compare fields in
   spr "{%s%s}"
-    (String.concat ", " (List.map strFieldType fields))
+    (commas (List.map strFieldType fields))
     (match width, fields with
        | ExactDomain, _    -> ""
        | UnknownDomain, [] -> "..."
        | UnknownDomain, _  -> ", ...")
 
+and strHeap h =
+  spr "(%s)" (commas (List.map strHeapBinding h))
+
+and strHeapBinding = function
+  | (l,HMu(mu))   -> spr "*%s: %s" (strLoc l) (strMu mu)
+  | (l,HRecd(rt)) -> spr "*%s: %s" (strLoc l) (strRecdType rt)
+
 and strMu = function
-  | Mu("_",rt)     -> strRecdTyp rt
-  | Mu(x,rt)       -> spr "mu %s. %s" x (strRecdTyp rt)
+  | Mu("_",rt)     -> strRecdType rt
+  | Mu(x,rt)       -> spr "mu %s. %s" x (strRecdType rt)
+  | MuVar(x)       -> x
   | MuAbbrev(x,[]) -> x
-  | MuAbbrev(x,ts) -> spr "%s(%s)" x (String.concat ", " (List.map strTyp ts))
+  | MuAbbrev(x,ts) -> spr "%s(%s)" x (commas (List.map strTyp ts))
 
 and strFieldType (f,t) = spr "%s: %s" f (strTyp t)
 
 let strBinding = strFieldType
 
 let strRelySet h =
-  let l = List.map strBinding (RelySet.elements h) in
-  spr "{%s}" (String.concat ", " l)
+  spr "{%s}" (commas (List.map strBinding (RelySet.elements h)))
 
 let rec strPreTyp = function
   | Exists(l,pt) -> spr "exists %s. %s" l (strPreTyp pt)
   | Typ(t) -> strTyp t
   | OpenArrow(r,tArgs,tRet) ->
-      spr "%s => %s" (strRelySet r) (strTyp (TArrow (tArgs, tRet)))
+      spr "%s => %s" (strRelySet r) (strTyp (LangUtils.pureArrow tArgs tRet))
 
 let tab k = String.make (2 * k) ' '
 
@@ -73,23 +95,27 @@ let rec strExp k exp = match exp.exp with
   | EBase(v) -> strBaseVal v
   | EVarRead(x) -> x
   | EApp(e,es) ->
-      spr "%s(%s)" (strExp k e) (String.concat ", " (List.map (strExp k) es))
+      spr "%s(%s)" (strExp k e) (commas (List.map (strExp k) es))
   | EFun(xs,body) ->
-      spr "function (%s) {\n%s%s\n%s}" (String.concat ", " xs)
+      spr "function (%s) {\n%s%s\n%s}" (commas xs)
         (tab (succ k)) (clip (strStmt (succ k) body))
       (tab k)
-  | EAs({exp=EFun(xs,body)},(Typ(TArrow(tArgs,tRet)) as tArrow)) ->
+  (* TODO attach poly arrow inline with func def *)
+  (* | EAs({exp=EFun(xs,body)},(Typ(TArrow(tArgs,tRet)) as tArrow)) -> *)
+  | EAs({exp=EFun(xs,body)},(Typ(TArrow([],tArgs,[],[],tRet,[])) as tArrow)) ->
       if List.length xs <> List.length tArgs then strEAs k exp tArrow
       else strFunAs k xs body RelySet.empty tArgs tRet
   | EAs({exp=EFun(xs,body)},(OpenArrow(r,tArgs,tRet) as tArrow)) ->
       if List.length xs <> List.length tArgs then strEAs k exp tArrow
       else strFunAs k xs body r tArgs tRet
   | EAs(e,pt) -> strEAs k e pt
-  | ECast(s,t) -> spr "(%s => %s)" (strTyp s) (strTyp t)
+  (* | ECast(s,t) -> spr "(%s => %s)" (strTyp s) (strTyp t) *)
+  | ECast([],[s],[],[],t,[]) -> spr "(%s => %s)" (strTyp s) (strTyp t)
+  | ECast(arrow) -> spr "(%s)" (strArrow arrow "=>")
   | ETcErr(s,e,_) -> spr "[[[ %s !!! TC ERROR !!! %s ]]]" (strExp k e) s
   | ETcInsert(e) -> spr "[%s]" (strExp k e)
   | EObj(l) ->
-      spr "{%s}" (String.concat ", "
+      spr "{%s}" (commas
         (List.map (fun (f, e) -> spr "%s = %s" f (strExp k e)) l))
   | EObjRead(e1,e2) ->
       (match LangUtils.isStr e2 with
@@ -102,7 +128,7 @@ and strFunAs k xs body h tArgs tRet =
   let sHeap = if RelySet.is_empty h then "" else spr "%s " (strRelySet h) in
   let sRet  = strTyp tRet in
   let sArgs = List.map strBinding (List.combine xs tArgs) in
-  let sArgs = String.concat ", " sArgs in
+  let sArgs = commas sArgs in
   spr "function %s(%s) -> %s {\n%s%s\n%s}" sHeap sArgs sRet
     (tab (succ k)) (clip (strStmt (succ k) body))
   (tab k)
@@ -137,13 +163,13 @@ and strStmt k stmt = match stmt.stmt with
   | STcInsert({stmt=SVarInvariant(x,t,s)}) ->
       spr "[invariant %s : %s;]\n%s%s" x (strTyp t) (tab k) (strStmt k s)
   | STcInsert({stmt=SClose(xs,s)}) ->
-      spr "[close {%s};]\n%s%s" (String.concat ", " xs) (tab k) (strStmt k s)
+      spr "[close {%s};]\n%s%s" (commas xs) (tab k) (strStmt k s)
   | STcInsert(s) ->
       spr "[%s]" (strStmt k s)
   | SVarInvariant(x,t,s) ->
       spr "invariant %s : %s;\n%s%s" x (strTyp t) (tab k) (strStmt k s)
   | SClose(xs,s) ->
-      spr "close {%s};\n%s%s" (String.concat ", " xs) (tab k) (strStmt k s)
+      spr "close {%s};\n%s%s" (commas xs) (tab k) (strStmt k s)
   | SLoadedSrc(f,s) ->
       spr "\n%s(*** %s ***)\n\n%s%s" (tab k) f (tab k) (strStmt k s)
       (* spr "\n%s\n\n%s%s" (tab k) (tab k) (strStmt k s) *)
@@ -151,7 +177,7 @@ and strStmt k stmt = match stmt.stmt with
       spr "extern val %s : %s;\n%s%s" x (strTyp t) (tab k) (strStmt k s)
       (* spr "extern val %s : %s\n%s%s" x (strTyp t) (tab k) (strStmt k s) *)
   | STyAbbrev(x,(ys,mu),s) ->
-      let tvars = if ys = [] then "" else spr "(%s)" (String.concat ", " ys) in
+      let tvars = if ys = [] then "" else spr "(%s)" (commas ys) in
         spr "type %s%s = %s;\n" x tvars (strMu mu)
       ^ spr "%s%s"              (tab k) (strStmt k s)
   | SObjAssign(e1,e2,e3) ->

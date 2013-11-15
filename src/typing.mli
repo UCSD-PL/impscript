@@ -15,7 +15,7 @@ val run : ('c -> ('a, 'b) result)
            -> ('a -> 'b -> ('a, 'b) result)
            -> ('a, 'b) result
 
-val sub       : (typ * typ) -> bool
+val sub       : typ -> typ -> bool
 
 val join      : typ -> typ -> typ
 

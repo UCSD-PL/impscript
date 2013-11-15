@@ -1,0 +1,15 @@
+extern val _plus : (num, num) -> num;
+
+type numlist = mu 'x. {hd: num, tl: ?('x)};
+
+var x; x = {};
+x.hd = 17;
+x.tl = null;
+fold (numlist, x);
+
+[x = unfold (numlist, x);]
+_plus(1, x.hd);
+
+[x.tl = ([L_] (?(*L_)) => *L_)(x.tl);]
+[x.tl = unfold (numlist, x.tl);]
+_plus(2, x.tl.hd);

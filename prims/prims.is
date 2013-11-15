@@ -1,4 +1,4 @@
-(* extern val _plus : ((num | str), (num | str)) -> (num | str); *)
+(** extern val _plus : ((num | str), (num | str)) -> (num | str); **)
 extern val _plus : (num, num) -> num;
 extern val _minus : (num, num) -> num;
 extern val _mult : (num, num) -> num;

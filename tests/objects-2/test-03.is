@@ -1,0 +1,9 @@
+extern val _plus : (num, num) -> num;
+
+var f; f = function [L] (x: *L) / (*L: {}) -> any / (*L: {f: num}) {
+  x.f = 1;
+};
+
+var obj; obj = {};
+f(obj);
+_plus(1, obj.f);

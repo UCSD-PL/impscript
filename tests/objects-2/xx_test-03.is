@@ -1,0 +1,3 @@
+var f; f = function [L] (xs: *L) / (*L: {}) -> any / (*L: {f: num}) {
+  xs.f = "bad";
+};

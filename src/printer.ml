@@ -55,7 +55,7 @@ and strHeapBinding = function
   | (l,HRecd(rt)) -> spr "*%s: %s" (strLoc l) (strRecdType rt)
 
 and strMu = function
-  | Mu("_",rt)     -> strRecdType rt
+  (* | Mu("_",rt)     -> strRecdType rt *)
   | Mu(x,rt)       -> spr "mu %s. %s" x (strRecdType rt)
   | MuVar(x)       -> x
   | MuAbbrev(x,[]) -> x

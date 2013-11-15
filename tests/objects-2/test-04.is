@@ -1,0 +1,9 @@
+var f; f = function [L] (b:bool, x: *L) / (*L: {}) -> any / (*L: {f: num, ...}) {
+  if (b) {
+    x.f = 1;
+    x.g = true;
+  } else {
+    x.f = 2;
+    x.h = "hi";
+  }
+};

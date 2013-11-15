@@ -88,9 +88,9 @@ parse_stmt :
  | INVARIANT x=VAR COLON t=typ SEMI { PSVarInvariant (x,t) }
  | CLOSE LBRACE xs=separated_list(COMMA,VAR) RBRACE SEMI { PSClose xs }
  | LBRACK ps=parse_stmt RBRACK { PSTcInsert ps }
- | TYPE x=VAR EQ mu=proper_mu_type SEMI { PSTyAbbrev (x, ([], mu)) }
+ | TYPE x=VAR EQ mu=mu_type_def SEMI { PSTyAbbrev (x, ([], mu)) }
  | TYPE x=VAR LPAREN ys=separated_list(COMMA,TVAR) RPAREN
-   EQ mu=proper_mu_type SEMI { PSTyAbbrev (x, (ys, mu)) }
+   EQ mu=mu_type_def SEMI { PSTyAbbrev (x, (ys, mu)) }
 
 base_val :
  | b=VBOOL { VBool b }
@@ -175,14 +175,16 @@ typ :
  | QMARK LPAREN t=typ RPAREN      { TMaybe t }
 
 mu_type : 
- | m=proper_mu_type                                 { m }
+ | m=mu_type_def                                    { m }
  | x=VAR                                            { MuAbbrev (x, []) }
  | x=VAR LPAREN ts=separated_list(COMMA,typ) RPAREN { MuAbbrev (x, ts) }
 
-proper_mu_type : 
- | x=option(mu_binder) LBRACE fts=separated_list(COMMA,field_type) RBRACE
-     { let x = match x with | Some(x) -> x | None -> "_" in
-       let (width,fts) =
+mu_type_def :
+ | x=mu_binder rt=recd_type { Mu (x, rt) }
+
+recd_type :
+ | LBRACE fts=separated_list(COMMA,field_type) RBRACE
+     { let (width,fts) =
          if fts = [] then (ExactDomain, fts)
          else match List.rev fts with
            | ("...",_)::fts -> (UnknownDomain, fts)
@@ -190,7 +192,7 @@ proper_mu_type :
        in
        let l = List.filter (fun (f,_) -> f = "...") fts in
        if List.length l > 0 then Log.printParseErr "[...] must appear at end";
-       Mu (x, TRecd (width, fts)) }
+       TRecd (width, fts) }
 
 field_exp :
  | f=VAR EQ e=exp { (f, e) }
@@ -210,8 +212,8 @@ heap :
  | LPAREN h=separated_list(COMMA,heap_binding) RPAREN { h }
 
 heap_binding :
- | STAR l=loc COLON mu=mu_type { (l, HMu mu) }
- (* TODO recd *)
+ | STAR l=loc COLON mu=mu_type     { (l, HMu mu) }
+ | STAR l=loc COLON rt=recd_type   { (l, HRecd rt) }
 
 poly_arrow_type :
  | x=poly_arrow_inputs ARROW y=poly_arrow_outputs { arrowOf x y }

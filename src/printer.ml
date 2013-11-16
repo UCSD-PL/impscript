@@ -16,11 +16,9 @@ let rec strTyp = function
   | TBase(TNull) -> "null"
   | TAny -> "any"
   | TBot -> "bot"
-  | TArrow([],ts,[],[],t,[]) ->
-      spr "(%s) -> %s" (commas (List.map strTyp ts)) (strTyp t)
-  | TArrow(arrow) -> strArrow arrow "->"
-  | TUnion(ts) ->
-      spr "(%s)" (String.concat " | " (List.map strTyp ts))
+  | TArrow(arrow) -> strArrow arrow true
+  | TUnion(ts) -> spr "U (%s)" (String.concat " " (List.map strTyp ts))
+  (* | TUnion(ts) -> spr "(%s)" (String.concat " | " (List.map strTyp ts)) *)
   (* | TRefLoc(l) -> spr "ref(%s)" (strLoc l) *)
   (* | TRefLoc(l) -> spr "<%s>" (strLoc l) *)
   | TRefLoc(l) -> spr "*%s" (strLoc l)
@@ -28,15 +26,19 @@ let rec strTyp = function
   | TExistsRef(l,mu) -> spr "exists *%s: %s. ref %s" l (strMu mu) l
   | TMaybe(t) -> spr "?(%s)" (strTyp t)
 
-and strArrow (allLocs,tArgs,h1,someLocs,tRet,h2) arrowSymbol =
-  spr "[%s] (%s)%s %s %s%s%s"
-    (commas allLocs)
+and strArrow (allLocs,tArgs,h1,someLocs,tRet,h2) flag =
+  let input = spr "%s%s%s"
+    (if allLocs = [] then "" else spr "all %s. " (commas allLocs))
     (commas (List.map strTyp tArgs))
     (if h1 = [] then "" else spr " / %s" (strHeap h1))
-    arrowSymbol
-    (if someLocs = [] then "" else spr "[%s] " (commas someLocs))
+  in
+  let output = spr "%s%s%s"
+    (if someLocs = [] then "" else spr "some %s. " (commas someLocs))
     (strTyp tRet)
     (if h2 = [] then "" else spr " / %s" (strHeap h2))
+  in
+  if flag then spr "(%s) -> (%s)" input output  (* type position *)
+  else spr "%s => %s" input output              (* cast position *)
 
 and strRecdType (TRecd(width,fields)) =
   let fields = List.sort compare fields in
@@ -48,7 +50,8 @@ and strRecdType (TRecd(width,fields)) =
        | UnknownDomain, _  -> ", ...")
 
 and strHeap h =
-  spr "(%s)" (commas (List.map strHeapBinding h))
+  commas (List.map strHeapBinding h)
+  (* spr "(%s)" (commas (List.map strHeapBinding h)) *)
 
 and strHeapBinding = function
   | (l,HMu(mu))   -> spr "*%s: %s" (strLoc l) (strMu mu)
@@ -110,8 +113,7 @@ let rec strExp k exp = match exp.exp with
       else strFunAs k xs body r tArgs tRet
   | EAs(e,pt) -> strEAs k e pt
   (* | ECast(s,t) -> spr "(%s => %s)" (strTyp s) (strTyp t) *)
-  | ECast([],[s],[],[],t,[]) -> spr "(%s => %s)" (strTyp s) (strTyp t)
-  | ECast(arrow) -> spr "(%s)" (strArrow arrow "=>")
+  | ECast(arrow) -> spr "(%s)" (strArrow arrow false)
   | ETcErr(s,e,_) -> spr "[[[ %s !!! TC ERROR !!! %s ]]]" (strExp k e) s
   | ETcInsert(e) -> spr "[%s]" (strExp k e)
   | EObj(l) ->

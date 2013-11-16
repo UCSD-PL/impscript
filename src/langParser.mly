@@ -48,6 +48,8 @@ let arrowOf inputs outputs =
   let (someLocs,tRet,h2) = outputs in
   (allLocs, tArgs, h1, someLocs, tRet, h2)
 
+let withDefault default opt = match opt with None -> default | Some x -> x
+
 %}
 
 %token <int> INT
@@ -61,8 +63,8 @@ let arrowOf inputs outputs =
 %token
   EOF NULL UNDEF
   IF ELSE COMMA COLON LBRACE RBRACE SEMI LPAREN RPAREN LBRACK RBRACK LT GT
-  PIPE FUN RET LETREF EQ EQARROW AS ARROW WHILE DOT QMARK TYPE
-  EXTERN VAL INVARIANT CLOSE FOLD UNFOLD
+  (* PIPE *) FUN RET LETREF EQ EQARROW AS ARROW WHILE DOT QMARK TYPE
+  EXTERN VAL INVARIANT CLOSE FOLD UNFOLD ALL SOME U
   TANY TBOT REF DOTS MU STAR SLASH
 
 %type <Lang.stmt> program
@@ -103,8 +105,7 @@ base_val :
 exp_ :
  | v=base_val                          { EBase v }
  | x=VAR                               { EVarRead x }
- | LPAREN s=typ EQARROW t=typ RPAREN   { (eCast s t).exp }
- | LPAREN arrow=poly_arrow_cast RPAREN { ECast arrow }
+ | LPAREN arrow=arrow_cast RPAREN      { ECast arrow }
  | e=exp AS LPAREN t=typ RPAREN        { EAs (e, Typ t) }
 
  | e=exp LPAREN es=separated_list(COMMA,exp) RPAREN { EApp (e, es) }
@@ -113,45 +114,37 @@ exp_ :
  | e1=exp LBRACK e2=exp RBRACK                      { EObjRead (e1, e2) }
  | FOLD LPAREN mu=mu_type COMMA e=exp RPAREN        { EFold (mu, e) }
  | UNFOLD LPAREN mu=mu_type COMMA e=exp RPAREN      { EUnfold (mu, e) }
+ | LBRACK e=exp_ RBRACK                             { ETcInsert (wrapExp e) }
 
- | FUN LPAREN xts=separated_list(COMMA,maybe_annotated_formal) RPAREN
-     tRetOpt=option(func_ret_type)
-     LBRACE b=block RBRACE
-       { let (xs,tArgOpts) = List.split xts in
-         match tRetOpt with
-           | None -> EFun (xs, stmtOfBlock b)
-           | Some(tRet) ->
-               let tArgs =
-                 List.map (function None -> TAny | Some(t) -> t) tArgOpts in
-               EAs (eFun xs (stmtOfBlock b), ptArrow RelySet.empty tArgs tRet) }
+ | FUN r=option(rely_set)
+       iw=lambda_input_world
+       ow=option(lambda_output_world) LBRACE b=block RBRACE
 
- | FUN LBRACE r=separated_list(COMMA,annotated_formal) RBRACE
-   LPAREN xts=separated_list(COMMA,annotated_formal) RPAREN
-   tRet=func_ret_type LBRACE b=block RBRACE
-     { let (xs,tArgs) = List.split xts in
-       let h =
-         List.fold_left
-           (fun acc (x,t) -> RelySet.add (x,t) acc) RelySet.empty r in
-       EAs (eFun xs (stmtOfBlock b), ptArrow h tArgs tRet) }
-
- | FUN LBRACK allLocs=separated_list(COMMA,LVAR) RBRACK
-   LPAREN xts=separated_list(COMMA,annotated_formal) RPAREN SLASH h1=heap
-   tRet=func_ret_type SLASH h2=heap LBRACE b=block RBRACE
-     { let (xs,tArgs) = List.split xts in
-       let arrow = Typ (TArrow (allLocs, tArgs, h1, [], tRet, h2)) in
-       EAs (eFun xs (stmtOfBlock b), arrow) }
-
- | LBRACK e=exp_ RBRACK { ETcInsert (wrapExp e) }
-
-maybe_annotated_formal :
- | x=VAR COLON t=typ { (x, Some t) }
- | x=VAR             { (x, None) }
-
-annotated_formal :
- | x=VAR COLON t=typ { (x, t) }
-
-func_ret_type :
- | ARROW t=typ { t }
+     { let (allLocs,xts,h1) = iw in
+       let (xs,tArgs) = List.split xts in
+       let isNone = function None -> true | _ -> false in
+       match r, List.for_all isNone tArgs, allLocs, h1, ow with
+         | None, true, None, None, None -> (* no annotations *)
+             EFun (xs, stmtOfBlock b)
+         | _ ->
+             let r = withDefault RelySet.empty r in
+             let allLocs = withDefault [] allLocs in
+             let h1 = withDefault [] h1 in
+             let tArgs = List.map (withDefault TAny) tArgs in
+             let (someLocs,tRet,h2) =
+               match ow with
+                 | None -> ([], TAny, [])
+                 | Some(someLocs,tRet,h2) ->
+                     (withDefault [] someLocs, tRet, withDefault [] h2)
+             in
+             let arrow =
+               if RelySet.is_empty r
+               then Typ (TArrow (allLocs,tArgs,h1,someLocs,tRet,h2))
+               else match allLocs, h1, someLocs, h2 with
+                 | [], [], [], [] -> ptArrow r tArgs tRet
+                 | _ -> failwith "TODO allow effectful open functions"
+             in
+             EAs (eFun xs (stmtOfBlock b), arrow) }
 
 typ :
  | t=TBASE { TBase t }
@@ -160,18 +153,15 @@ typ :
  | UNDEF   { tUndef }
  | NULL    { tNull }
 
- | LPAREN ts=separated_list(COMMA,typ) RPAREN ARROW s=typ { pureArrow ts s }
- | arrow=poly_arrow_type                                  { TArrow arrow }
+ | arrow=arrow_type                    { TArrow arrow }
+ | U LPAREN s=typ ts=list(typ) RPAREN  { tUnion (s::ts) }
 
- | LPAREN s=typ PIPE ts=separated_list(PIPE,typ) RPAREN { tUnion (s::ts) }
-     (* conflicts for union types without parens... *)
+ (* | LPAREN s=typ PIPE ts=separated_list(PIPE,typ) RPAREN { tUnion (s::ts) } *)
 
  | x=TVAR                         { TExistsRef ("L", MuVar x) }
-
  | REF LPAREN l=loc RPAREN        { TRefLoc l }
  | LT l=loc GT                    { TRefLoc l }
  | STAR l=loc                     { TRefLoc l }
-
  | QMARK LPAREN t=typ RPAREN      { TMaybe t }
 
 mu_type : 
@@ -180,7 +170,7 @@ mu_type :
  | x=VAR LPAREN ts=separated_list(COMMA,typ) RPAREN { MuAbbrev (x, ts) }
 
 mu_type_def :
- | x=mu_binder rt=recd_type { Mu (x, rt) }
+ | MU x=TVAR DOT rt=recd_type { Mu (x, rt) }
 
 recd_type :
  | LBRACE fts=separated_list(COMMA,field_type) RBRACE
@@ -201,38 +191,57 @@ field_type :
  | f=VAR COLON t=typ { (f, t) }
  | DOTS              { ("...", TBot) }
 
-mu_binder :
- | MU x=TVAR DOT { x }
+arrow_type :
+ | LPAREN x=input_world RPAREN ARROW
+   LPAREN y=output_world RPAREN         { arrowOf x y }
+
+arrow_cast :
+ | x=input_world EQARROW y=output_world { arrowOf x y }
+
+input_world :
+ | ls=option(all_locs) ts=separated_list(COMMA,typ) h=option(slash_heap) 
+     { (withDefault [] ls, ts, withDefault [] h) }
+
+output_world :
+ | ls=option(some_locs) t=typ h=option(slash_heap)
+     { (withDefault [] ls, t, withDefault [] h) }
+
+lambda_input_world :
+ | LPAREN allLocs=option(all_locs)
+          xts=separated_list(COMMA,maybe_annotated_formal)
+          h1=option(slash_heap) RPAREN
+     { (allLocs, xts, h1) }
+
+lambda_output_world :
+ | ARROW LPAREN someLocs=option(some_locs) tRet=typ h2=option(slash_heap) RPAREN
+     { (someLocs, tRet, h2) }
+
+maybe_annotated_formal :
+ | x=VAR COLON t=typ { (x, Some t) }
+ | x=VAR             { (x, None) }
+
+annotated_formal :
+ | x=VAR COLON t=typ { (x, t) }
+
+rely_set :
+ | LBRACE r=separated_list(COMMA,annotated_formal) RBRACE
+     { List.fold_left
+         (fun acc (x,t) -> RelySet.add (x,t) acc)
+         RelySet.empty r }
+
+all_locs  : ALL  l=separated_list(COMMA,LVAR) DOT { l }
+some_locs : SOME l=separated_list(COMMA,LVAR) DOT { l }
 
 loc :
  | x=LVAR { LVar x }
  (* TODO loc constants *)
 
-heap :
- | LPAREN h=separated_list(COMMA,heap_binding) RPAREN { h }
+slash_heap :
+ | SLASH h=separated_list(COMMA,heap_binding) { h }
 
 heap_binding :
  | STAR l=loc COLON mu=mu_type     { (l, HMu mu) }
  | STAR l=loc COLON rt=recd_type   { (l, HRecd rt) }
-
-poly_arrow_type :
- | x=poly_arrow_inputs ARROW y=poly_arrow_outputs { arrowOf x y }
-
-poly_arrow_cast :
- | x=poly_arrow_inputs EQARROW y=poly_arrow_outputs { arrowOf x y }
-
-poly_arrow_inputs :
- | LBRACK allLocs=separated_list(COMMA,LVAR) RBRACK
-   LPAREN tArgs=separated_list(COMMA,typ) RPAREN
-   ho=option(slash_heap)
-     { let h1 = match ho with None -> [] | Some h -> h in
-       (allLocs, tArgs, h1) }
-
-poly_arrow_outputs :
- | t=typ { ([], t, []) }
-
-slash_heap :
- | SLASH h=heap { h }
 
 exp : e=exp_ { wrapExp e } (* TODO attach line info here... *)
 

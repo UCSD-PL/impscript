@@ -51,7 +51,10 @@ rule token = parse
   | "close"        { CLOSE }
   | "fold"         { FOLD }
   | "unfold"       { UNFOLD }
+  | "all"          { ALL }
+  | "some"         { SOME }
   | "..."          { DOTS }
+  | "U"            { U }
   | "("            { LPAREN }
   | ")"            { RPAREN }
   | "{"            { LBRACE }
@@ -65,7 +68,7 @@ rule token = parse
   | ","            { COMMA }
   | ";"            { SEMI }
   | ":"            { COLON }
-  | "|"            { PIPE }
+  (* | "|"            { PIPE } *)
   | "?"            { QMARK }
   | "*"            { STAR }
 

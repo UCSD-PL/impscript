@@ -1,19 +1,19 @@
-extern val _plus : (num, num) -> num;
+extern val _plus : (num, num) -> (num);
 
 type numlist = mu 'x. {hd: num, tl: ?('x)};
 
-var f; f = function [L] (xs: ?(*L)) / (*L: numlist) -> any / (*L: numlist) {
-  [xs = ([L_] (?(*L_)) => *L_)(xs);]
+var f; f = function (all L. xs: ?(*L) / *L: numlist) -> (any / *L: numlist) {
+  [xs = (all L_. ?(*L_) => *L_)(xs);]
   [unfold (numlist, xs);]
   _plus(1, xs.hd);
   _plus(2, xs.hd);
 
-  [xs.tl = ([L_] (?(*L_)) => *L_)(xs.tl);]
+  [xs.tl = (all L_. ?(*L_) => *L_)(xs.tl);]
   [unfold (numlist, xs.tl);]
   _plus(3, xs.tl.hd);
   _plus(4, xs.tl.hd);
 
-  [xs.tl.tl = ([L_] (?(*L_)) => *L_)(xs.tl.tl);]
+  [xs.tl.tl = (all L_. ?(*L_) => *L_)(xs.tl.tl);]
   [unfold (numlist, xs.tl.tl);]
   _plus(5, xs.tl.tl.hd);
 

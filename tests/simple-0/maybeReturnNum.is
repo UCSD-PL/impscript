@@ -1,15 +1,4 @@
-
-(*** ../prims/prims.is ***)
-
-extern val _plus : (num, num) -> num;
-extern val _minus : (num, num) -> num;
-extern val _eek : (str, str) -> bool;
-extern val _typeof : (any) -> str;
-extern val _not : (bool) -> bool;
-
-(*** ../tests/simple-0/maybeReturnNum.js ***)
-
-var foo; foo = function () -> (num | undefined) {
+var foo; foo = function () -> (U(num undefined)) {
   if (true) {
     return 3.14;
   } else {

@@ -1,8 +1,8 @@
-extern val _plus : (num, num) -> num;
+extern val _plus : (num, num) -> (num);
 
 type numlist = mu 'x. {hd: num, tl: ?('x)};
 
-var f; f = function [L] (xs: *L) / (*L: numlist) -> *L / () {
+var f; f = function (all L. xs: *L / *L: numlist) -> (*L) {
   [unfold(numlist, xs);]
   xs.hd = _plus(1, xs.hd);
   [fold(numlist, xs);]

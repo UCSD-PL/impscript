@@ -1,16 +1,6 @@
-
-(*** ../prims/prims.is ***)
-
-extern val _plus : (num, num) -> num;
-extern val _minus : (num, num) -> num;
-extern val _mult : (num, num) -> num;
-extern val _eek : (str, str) -> bool;
-extern val _typeof : (any) -> str;
-extern val _not : (bool) -> bool;
-extern val _lt : (num, num) -> bool;
-extern val _le : (num, num) -> bool;
-
-(*** ../tests/simple-0/loop-00.js ***)
+extern val _plus : (num, num) -> (num);
+extern val _minus : (num, num) -> (num);
+extern val _lt : (num, num) -> (bool);
 
 var i; i = 0;
 while (_lt(i, 10)) {

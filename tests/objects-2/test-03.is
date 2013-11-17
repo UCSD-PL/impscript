@@ -1,6 +1,6 @@
-extern val _plus : (num, num) -> num;
+extern val _plus : (num, num) -> (num);
 
-var f; f = function [L] (x: *L) / (*L: {}) -> any / (*L: {f: num}) {
+var f; f = function (all L. x: *L / *L: {}) -> (any / *L: {f: num}) {
   x.f = 1;
 };
 

@@ -1,4 +1,4 @@
-var f; f = function [L] (b:bool, x: *L) / (*L: {}) -> any / (*L: {f: num, ...}) {
+var f; f = function (all L. b:bool, x: *L / *L: {}) -> (any / *L: {f: num, ...}) {
   if (b) {
     x.f = 1;
     x.g = true;

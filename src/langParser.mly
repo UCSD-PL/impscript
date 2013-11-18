@@ -112,7 +112,7 @@ exp_ :
  | LBRACK e=exp_ RBRACK                             { ETcInsert (wrapExp e) }
 
  | FUN r=option(rely_set)
-       iw=lambda_input_world
+       f=option(VAR) iw=lambda_input_world
        ow=option(lambda_output_world) LBRACE b=block RBRACE
 
      { let (allLocs,xts,h1) = iw in
@@ -130,16 +130,16 @@ exp_ :
                match ow with
                  | None -> ([], TAny, [])
                  | Some(someLocs,tRet,h2) ->
-                     (withDefault [] someLocs, tRet, withDefault [] h2)
-             in
-             let arrow =
-               if RelySet.is_empty r
-               then Typ (TArrow ((allLocs,tArgs,h1),(someLocs,tRet,h2)))
-               else match allLocs, h1, someLocs, h2 with
-                 | [], [], [], [] -> ptArrow r tArgs tRet
-                 | _ -> failwith "TODO allow effectful open functions"
-             in
-             EAs (eFun xs (stmtOfBlock b), arrow) }
+                     (withDefault [] someLocs, tRet, withDefault [] h2) in
+             let arrow = ((allLocs, tArgs, h1), (someLocs, tRet, h2)) in
+             let rely =
+               match f, RelySet.is_empty r with
+                 | None,   _    -> r
+                 | Some f, true -> RelySet.singleton (f, TArrow arrow)
+                 | Some _, false ->
+                     Log.printParseErr "bad recursive function annotation" in
+             let ptArrow = finishArrow rely arrow in
+             EAs (eFun xs (stmtOfBlock b), ptArrow) }
 
 typ :
  | t=TBASE { TBase t }

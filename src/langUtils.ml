@@ -63,9 +63,8 @@ let tUnion ts =
 
 let pureArrow tArgs tRet = TArrow (([], tArgs, []), ([], tRet, []))
 
-let ptArrow r tArgs tRet =
-  if RelySet.is_empty r then Typ (pureArrow tArgs tRet)
-  else OpenArrow (r, tArgs, tRet)
+let finishArrow r arrow =
+  if RelySet.is_empty r then Typ (TArrow arrow) else OpenArrow (r, arrow)
 
 let isStr = function
   | {exp=EBase(VStr(s))} -> Some s

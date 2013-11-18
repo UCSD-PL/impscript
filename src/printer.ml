@@ -72,10 +72,9 @@ let strRelySet h =
   spr "{%s}" (commas (List.map strBinding (RelySet.elements h)))
 
 let rec strPreTyp = function
-  | Exists(l,pt) -> spr "exists %s. %s" l (strPreTyp pt)
-  | Typ(t) -> strTyp t
-  | OpenArrow(r,tArgs,tRet) ->
-      spr "%s => %s" (strRelySet r) (strTyp (LangUtils.pureArrow tArgs tRet))
+  | Typ(t)             -> strTyp t
+  | OpenArrow(r,arrow) -> spr "%s %s" (strRelySet r) (strArrow arrow true)
+  | Exists(l,pt)       -> spr "exists %s. %s" l (strPreTyp pt)
 
 let tab k = String.make (2 * k) ' '
 
@@ -108,7 +107,7 @@ let rec strExp k exp = match exp.exp with
   | EAs({exp=EFun(xs,body)},(Typ(TArrow(([],tArgs,[]),([],tRet,[]))) as tArrow)) ->
       if List.length xs <> List.length tArgs then strEAs k exp tArrow
       else strFunAs k xs body RelySet.empty tArgs tRet
-  | EAs({exp=EFun(xs,body)},(OpenArrow(r,tArgs,tRet) as tArrow)) ->
+  | EAs({exp=EFun(xs,body)},(OpenArrow(r,(([],tArgs,[]),([],tRet,[]))) as tArrow)) ->
       if List.length xs <> List.length tArgs then strEAs k exp tArrow
       else strFunAs k xs body r tArgs tRet
   | EAs(e,pt) -> strEAs k e pt
@@ -126,6 +125,7 @@ let rec strExp k exp = match exp.exp with
   | EFold(mu,e) -> spr "fold (%s, %s)" (strMu mu) (strExp k e)
   | EUnfold(mu,e) -> spr "unfold (%s, %s)" (strMu mu) (strExp k e)
 
+(* TODO *)
 and strFunAs k xs body h tArgs tRet =
   let sHeap = if RelySet.is_empty h then "" else spr "%s " (strRelySet h) in
   let sRet  = strTyp tRet in

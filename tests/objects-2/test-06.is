@@ -1,0 +1,26 @@
+extern val _plus : (num, num) -> (num);
+
+type numlist = mu 'x. {hd: num, tl: ?('x)};
+
+var sum; sum = function sum (all L. xs:?(*L) / *L: numlist) -> (num / *L: numlist) {
+  if ([(?(*L) => bool)](xs)) {
+    var i;
+    [xs = (all L_. ?(*L_) => *L_)(xs);]
+    [unfold (numlist, xs);]
+    i = xs.hd;
+    var j; j = sum(xs.tl);
+    [fold(numlist, xs);]
+    return _plus(i, j);
+  } else {
+    return 0;
+  }
+};
+
+var obj0; obj0 = {hd = 0, tl = null};
+fold(numlist, obj0);
+
+var obj1; obj1 = {hd = 1, tl = obj0};
+fold(numlist, obj1);
+
+[close {sum};]
+sum(obj1);

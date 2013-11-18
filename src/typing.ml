@@ -153,8 +153,8 @@ let projTyp = function
   | Typ(t) -> t
   | _ -> failwith "projTyp"
 
-let wellFormed : TypeEnv.t -> typ -> bool =
-fun typeEnv t ->
+let wellFormed : TypeEnv.t -> pre_type -> bool =
+fun typeEnv pt ->
   (* TODO *)
   true
 
@@ -526,7 +526,7 @@ let transitiveAssumeVars f heapEnv =
   let rec doOne f acc =
     let acc = Vars.add f acc in
     match HeapEnv.lookupVar f heapEnv with
-      | Some(OpenArrow(rely,_,_)) ->
+      | Some(OpenArrow(rely,_)) ->
           RelySet.fold
             (fun (g,_) acc -> if Vars.mem g acc then acc else doOne g acc)
             rely acc
@@ -629,11 +629,14 @@ let rec tcExp (typeEnv, heapEnv, exp) = match exp.exp with
   | EAs({exp=EFun(xs,body)},Typ(TArrow(([],tArgs,[]),([],tRet,[])))) ->
       tcAnnotatedFun typeEnv heapEnv xs body RelySet.empty tArgs tRet
 
-  | EAs({exp=EFun(xs,body)},OpenArrow(r,tArgs,tRet)) ->
+  | EAs({exp=EFun(xs,body)},OpenArrow(r,(([],tArgs,[]),([],tRet,[])))) ->
       tcAnnotatedFun typeEnv heapEnv xs body r tArgs tRet
 
   | EAs({exp=EFun(xs,body)},Typ(TArrow(arrow))) ->
-      tcAnnotatedPolyFun typeEnv heapEnv xs body arrow
+      tcAnnotatedPolyFun typeEnv heapEnv xs body RelySet.empty arrow
+
+  | EAs({exp=EFun(xs,body)},OpenArrow(r,arrow)) ->
+      tcAnnotatedPolyFun typeEnv heapEnv xs body r arrow
 
   | ECast(arrow) ->
       Ok (exp, (Typ (TArrow arrow), heapEnv, MoreOut.empty))
@@ -787,8 +790,8 @@ and tcBareFun typeEnv heapEnv xs body =
       match pt with
         | Exists _ -> failwith "tcBareFun exists"
         | Typ(t) -> (RelySet.add (x,t) acc1, HeapEnv.addVar x (Typ t) acc2)
-        | OpenArrow(_,tArgs,tRet) ->
-            let tArrow = pureArrow tArgs tRet in
+        | OpenArrow(_,arrow) ->
+            let tArrow = TArrow arrow in
             (RelySet.add (x,tArrow) acc1, HeapEnv.addVar x (Typ tArrow) acc2)
     ) heapEnv.HeapEnv.vars (RelySet.empty, heapEnvFun) in
 
@@ -808,13 +811,13 @@ and tcBareFun typeEnv heapEnv xs body =
               RelySet.filter
                 (fun (x,_) -> Vars.mem x out.MoreOut.usedVars) rely in
             let tRet = removeLocsFromType tRet in
-            let arrow = ptArrow rely tArgs tRet in
+            let ptArrow = finishArrow rely (([], tArgs, []), ([], tRet, [])) in
             let out = { out with MoreOut.retTypes = Types.empty } in
-            Ok (eAs (eFun xs body) arrow, (arrow, heapEnv, out)))
+            Ok (eAs (eFun xs body) ptArrow, (ptArrow, heapEnv, out)))
 
 (* simpler version of tcAnnotatedFunPoly for pure arrows *)
 and tcAnnotatedFun typeEnv heapEnv xs body rely tArgs tRet =
-  let origArrow = OpenArrow (rely, tArgs, tRet) in
+  let origArrow = OpenArrow (rely, (([], tArgs, []), ([], tRet, []))) in
   if List.length xs <> List.length tArgs
     then failwith "add handling for len(actuals) != len(formals)";
   let typeEnv = TypeEnv.addRetWorld ([], tRet, []) typeEnv in
@@ -836,22 +839,25 @@ and tcAnnotatedFun typeEnv heapEnv xs body rely tArgs tRet =
             let err = "function body has an open type" in
             Err (eAs (eFun xs (sTcErr err body)) origArrow)
         | Typ(tBody) ->
-            let arrow = ptArrow rely tArgs tRet in
+            let ptArrow = finishArrow rely (([], tArgs, []), ([], tRet, [])) in
             if sub tBody tRet then
-              Ok (eAs (eFun xs body) arrow, (arrow, heapEnv, MoreOut.empty))
+              Ok (eAs (eFun xs body) ptArrow, (ptArrow, heapEnv, MoreOut.empty))
             else
               let err = "fun has bad fall-thru type" in
               Err (eAs (eFun xs (sTcErr err body)) origArrow))
 
-and tcAnnotatedPolyFun typeEnv heapEnv xs body arrow =
+and tcAnnotatedPolyFun typeEnv heapEnv xs body rely arrow =
   let ((allLocs,tArgs,h1),(someLocs,tRet,h2)) = arrow in
-  let tArrow = TArrow arrow in
-  let ptArrow = Typ tArrow in
-  if not (wellFormed typeEnv tArrow) then
+  let ptArrow = finishArrow rely arrow in
+  if not (wellFormed typeEnv ptArrow) then
     Err (eTcErr "arrow not well-formed" (eAs (eFun xs body) ptArrow))
   else if List.length xs != List.length tArgs then
     failwith "add handling for len(actuals) != len(formals)"
   else
+    let typeEnv =
+      RelySet.fold
+        (fun (x,t) acc -> TypeEnv.addVar x (InvariantRef t) acc) rely typeEnv
+    in
     let typeEnv = TypeEnv.addLocVars allLocs typeEnv in
     let typeEnv = TypeEnv.addRetWorld (someLocs, tRet, h2) typeEnv in
     let (typeEnv,heapEnvFun) =
@@ -1232,9 +1238,9 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
           match TypeEnv.lookupType x typeEnv with
            | Some(StrongRef) ->
                (match HeapEnv.lookupVar x heapEnv with
-                 | Some(OpenArrow(r,tArgs,tRet)) ->
+                 | Some(OpenArrow(r,arrow)) ->
                      let accR = RelySet.union accR r in
-                     let accG = RelySet.add (x, pureArrow tArgs tRet) accG in
+                     let accG = RelySet.add (x, TArrow arrow) accG in
                      (accR, accG)
                  | Some(Typ _)
                  | Some(Exists _) -> failwith (spr "[%s] is not open func" x)

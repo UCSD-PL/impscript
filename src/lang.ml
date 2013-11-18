@@ -59,7 +59,7 @@ type rely = RelySet.t
 
 type pre_type =
   | Typ of typ
-  | OpenArrow of rely * typ list * typ
+  | OpenArrow of rely * arrow
   | Exists of var * pre_type
 
 type base_val =

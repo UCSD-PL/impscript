@@ -33,7 +33,11 @@ type typ =
   | TMaybe of typ
   | TExistsRef of loc_var * mu_type (* exists *L: 'x. Ref L *)
 
+(* TODO pair worlds *)
 and arrow = (loc_var list * typ list * heap * loc_var list * typ * heap)
+
+and input_world  = (loc_var list * typ list * heap)
+and output_world = (loc_var list * typ * heap)
 
 and recd_type =
   | TRecd of width * (field * typ) list

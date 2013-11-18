@@ -1,0 +1,21 @@
+extern val _plus : (num, num) -> (num);
+
+var f; f = function () -> (some L. *L / *L: {f: num}) {
+  var x; x = {};
+  x.f = 1;
+  return x;
+};
+
+var g; g = function (all L. x:*L / *L: {f: num}) -> (num / *L: {f: num}) {
+  return x.f;
+};
+
+var y; y = f();
+g(y);
+_plus(1, y.f);
+g(y);
+
+var z; z = f();
+g(z);
+_plus(1, z.f);
+g(z);

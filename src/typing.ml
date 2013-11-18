@@ -19,13 +19,13 @@ module TypeEnv = struct
   type t = { bindings: type_env_binding VarMap.t;
              loc_vars: Vars.t;
              ty_abbrevs: (ty_var list * mu_type) StrMap.t;
-             ret_world: typ * heap; }
+             ret_world: output_world; }
 
   let empty : t =
     { bindings = VarMap.empty;
       loc_vars = Vars.empty;
       ty_abbrevs = StrMap.empty;
-      ret_world = (TBot, []); }
+      ret_world = ([], TBot, []); }
 
   let lookupType : var -> t -> type_env_binding option =
   fun x typeEnv ->
@@ -33,11 +33,11 @@ module TypeEnv = struct
     then Some (VarMap.find x typeEnv.bindings)
     else None
 
-  let addRetWorld : (typ * heap) -> t -> t =
+  let addRetWorld : output_world -> t -> t =
   fun w typeEnv ->
     { typeEnv with ret_world = w }
 
-  let lookupRetWorld : t -> (typ * heap) =
+  let lookupRetWorld : t -> output_world =
   fun typeEnv ->
     typeEnv.ret_world
 
@@ -238,7 +238,10 @@ let removeHeap : HeapEnv.t -> heap -> HeapEnv.t =
   List.fold_left (fun acc (l,_) -> HeapEnv.removeLoc l acc)
 
 let addHeap : HeapEnv.t -> heap -> HeapEnv.t =
-  List.fold_left (fun acc (l,lb) -> HeapEnv.addLoc l lb acc)
+  List.fold_left (fun acc (l,lb) ->
+    if HeapEnv.memLoc l acc
+    then failwith (spr "addHeap: %s already in heap env" (strLoc l))
+    else HeapEnv.addLoc l lb acc)
 
 let rec join s t = match s, t with
   | s, t when s = t -> s
@@ -457,6 +460,67 @@ fun typeEnv lb ->
   match synthesizeRecd rt with
     | Some _ -> true
     | None   -> false
+
+type loc_subst = (loc_var * loc) list
+
+(* in addition to a substitution, computes a heap environment in case
+   dummy objects were synthesized for unreachable locations *)
+
+let computeLocSubst : TypeEnv.t -> HeapEnv.t
+                   -> loc_var list -> typ list -> typ list -> heap
+                   -> (loc_subst * HeapEnv.t) option =
+fun typeEnv heapEnv locVars tsActual tsExpected hExpected ->
+  List.fold_left (fun acc locVar_i ->
+    ifSome acc (fun (subst,heapEnv) ->
+      let maybeLocArgAndHeapEnv =
+        List.fold_left (fun acc (tActual,tExpected) ->
+          ifNone acc (fun () ->
+            match tActual, tExpected with
+             | TMaybe TRefLoc l, TMaybe TRefLoc LVar lv
+             | TRefLoc l, TMaybe TRefLoc LVar lv
+             | TRefLoc l, TRefLoc LVar lv when lv = locVar_i ->
+                 let _ = pr "%s |-> %s\n" locVar_i (strLoc l); flush stdout in
+                 Some (l, heapEnv)
+             | TBase TNull, TMaybe TRefLoc LVar lv 
+               when List.mem_assoc (LVar lv) hExpected ->
+                 let lb = List.assoc (LVar lv) hExpected in
+                 if not (synthesizable typeEnv lb) then None
+                 else
+                   let lv = genLocVar ~name:"dummy" () in
+                   let heapEnv = HeapEnv.addLoc (LVar lv) lb heapEnv in
+                   Some (LVar lv, heapEnv)
+             | _ ->
+                 None)
+        ) None (List.combine tsActual tsExpected)
+      in
+      match maybeLocArgAndHeapEnv with
+       | None -> None
+       | Some (locArg_i, heapEnv) ->
+           Some (subst @ [(locVar_i,locArg_i)], heapEnv))
+  ) (Some ([], heapEnv)) locVars
+
+let applySubst : loc_subst -> typ -> typ =
+fun subst ->
+  mapTyp (function
+    | TRefLoc LVar x when List.mem_assoc x subst -> TRefLoc (List.assoc x subst)
+    | t -> t
+  )
+
+let applySubstToHeap : loc_subst -> heap -> heap =
+fun subst ->
+  List.map (fun (l,lb) ->
+    let l =
+      match l with
+       | LVar lv when List.mem_assoc lv subst -> List.assoc lv subst
+       | _ -> l
+    in (l, lb) (* TODO need to recurse into bindings? *)
+  )
+
+let freshen : loc_var list -> loc_subst =
+fun xs ->
+  let freshenOne x = genLocVar ~name:x () in
+  let ys = List.map freshenOne xs in
+  List.combine xs (List.map (fun y -> LVar y) ys)
 
 let transitiveAssumeVars f heapEnv =
   let rec doOne f acc =
@@ -709,7 +773,7 @@ let rec tcExp (typeEnv, heapEnv, exp) = match exp.exp with
 
 and tcBareFun typeEnv heapEnv xs body =
 
-  let typeEnv = TypeEnv.addRetWorld (TAny, []) typeEnv in
+  let typeEnv = TypeEnv.addRetWorld ([], TAny, []) typeEnv in
   let (typeEnv,heapEnvFun) =
     List.fold_left (fun (acc1,acc2) x ->
       (TypeEnv.addVar x StrongRef acc1, HeapEnv.addVar x (Typ TAny) acc2)
@@ -753,7 +817,7 @@ and tcAnnotatedFun typeEnv heapEnv xs body rely tArgs tRet =
   let origArrow = OpenArrow (rely, tArgs, tRet) in
   if List.length xs <> List.length tArgs
     then failwith "add handling for len(actuals) != len(formals)";
-  let typeEnv = TypeEnv.addRetWorld (tRet, []) typeEnv in
+  let typeEnv = TypeEnv.addRetWorld ([], tRet, []) typeEnv in
   let (typeEnv,heapEnvFun) =
     List.fold_left (fun (acc1,acc2) (x,t) ->
       (TypeEnv.addVar x StrongRef acc1, HeapEnv.addVar x (Typ t) acc2)
@@ -781,7 +845,6 @@ and tcAnnotatedFun typeEnv heapEnv xs body rely tArgs tRet =
 
 and tcAnnotatedPolyFun typeEnv heapEnv xs body arrow =
   let (allLocs,tArgs,h1,someLocs,tRet,h2) = arrow in
-  if someLocs <> [] then failwith "tcAnnotatedPolyFun someLocs";
   let tArrow = TArrow arrow in
   let ptArrow = Typ tArrow in
   if not (wellFormed typeEnv tArrow) then
@@ -790,7 +853,7 @@ and tcAnnotatedPolyFun typeEnv heapEnv xs body arrow =
     failwith "add handling for len(actuals) != len(formals)"
   else
     let typeEnv = TypeEnv.addLocVars allLocs typeEnv in
-    let typeEnv = TypeEnv.addRetWorld (tRet, h2) typeEnv in
+    let typeEnv = TypeEnv.addRetWorld (someLocs, tRet, h2) typeEnv in
     let (typeEnv,heapEnvFun) =
       List.fold_left (fun (acc1,acc2) (x,tArg) ->
         let acc1 = TypeEnv.addVar x StrongRef acc1 in
@@ -810,18 +873,29 @@ and tcAnnotatedPolyFun typeEnv heapEnv xs body arrow =
       (fun body (pt,heapEnvFunOut,_) ->
          let (locs,pt) = stripExists pt in
          match pt with
+          | Typ TBot ->
+               let stuff = (ptArrow, heapEnv, MoreOut.empty) in
+               Ok (eAs (eFun xs body) ptArrow, stuff)
           | Typ(tBody) ->
-              (* will need to deal with someLocs and locs here *)
-              if not (sub tBody tRet) then
-                let err = "bad fall-thru type" in
-                Err (eAs (eFun xs (sTcErr err body)) ptArrow)
-              else if not (heapSat heapEnvFunOut h2) then
-                let err = spr "bad fall-thru heap environment:\n\n%s\n\n%s\n\n"
-                  (HeapEnv.strLocs heapEnvFunOut) (strHeap h2) in
-                Err (eAs (eFun xs (sTcErr err body)) ptArrow)
-              else
-                let stuff = (ptArrow, heapEnv, MoreOut.empty) in
-                Ok (eAs (eFun xs body) ptArrow, stuff)
+              let substAndHeapEnv =
+                computeLocSubst typeEnv heapEnv someLocs [tBody] [tRet] h2 in
+              (match substAndHeapEnv with
+                | None ->
+                    let err = "couldn't infer output instantiations" in
+                    Err (eAs (eFun xs (sTcErr err body)) ptArrow)
+                | Some (subst, heapEnv) ->
+                    let tRet = applySubst subst tRet in
+                    let h2 = applySubstToHeap subst h2 in
+                    if not (sub tBody tRet) then
+                      let err = "bad fall-thru type" in
+                      Err (eAs (eFun xs (sTcErr err body)) ptArrow)
+                    else if not (heapSat heapEnvFunOut h2) then
+                      let err = spr "bad fall-thru heap environment:\n\n%s\n\n%s\n\n"
+                        (HeapEnv.strLocs heapEnvFunOut) (strHeap h2) in
+                      Err (eAs (eFun xs (sTcErr err body)) ptArrow)
+                    else
+                      let stuff = (ptArrow, heapEnv, MoreOut.empty) in
+                      Ok (eAs (eFun xs body) ptArrow, stuff))
           | _ ->
               let err = "type of body is open" in
               Err (eAs (eFun xs (sTcErr err body)) ptArrow))
@@ -850,7 +924,6 @@ and tcApp1 typeEnv heapEnv outFun eFun eArgs tArgs tRet =
 
 and tcAppPoly typeEnv heapEnv outFun eFun eArgs arrow =
   let (allLocs,tArgsExpected,h1,someLocs,tRet,h2) = arrow in
-  if someLocs <> [] then failwith "tcAppPoly: someLocs TODO";
   let (eArgs,maybeOutput) =
     List.fold_left (fun (eArgs,maybeOutput) eArg ->
       match maybeOutput with
@@ -874,54 +947,12 @@ and tcAppPoly typeEnv heapEnv outFun eFun eArgs arrow =
   match maybeOutput with
    | None -> Err (eApp eFun eArgs)
    | Some(tArgsActual,existentialLocs,heapEnv,out) ->
-       (* in addition to a substitution, computes a heap environment in case
-          dummy objects were synthesized for unreachable locations *)
-       let maybeSubstAndHeapEnv =
-         List.fold_left (fun acc locVar_i ->
-           ifSome acc (fun (subst,heapEnv) ->
-             let maybeLocArgAndHeapEnv =
-               List.fold_left (fun acc (tArgActual,tArgExpected) ->
-                 ifNone acc (fun () ->
-                   match tArgActual, tArgExpected with
-                    | TMaybe TRefLoc l, TMaybe TRefLoc LVar lv
-                    | TRefLoc l, TMaybe TRefLoc LVar lv
-                    | TRefLoc l, TRefLoc LVar lv when lv = locVar_i ->
-                        let _ = pr "%s |-> %s\n" locVar_i (strLoc l) in
-                        Some (l, heapEnv)
-                    | TBase TNull, TMaybe TRefLoc LVar lv 
-                      when List.mem_assoc (LVar lv) h1 ->
-                        let lb = List.assoc (LVar lv) h1 in
-                        if not (synthesizable typeEnv lb) then None
-                        else
-                          let lv = genLocVar ~name:"dummy" () in
-                          let heapEnv = HeapEnv.addLoc (LVar lv) lb heapEnv in
-                          Some (LVar lv, heapEnv)
-                    | _ ->
-                        None)
-               ) None (List.combine tArgsActual tArgsExpected)
-             in
-             match maybeLocArgAndHeapEnv with
-              | None -> None
-              | Some (locArg_i, heapEnv) ->
-                  Some (subst @ [(locVar_i,locArg_i)], heapEnv))
-         ) (Some ([], heapEnv)) allLocs
-       in
-       match maybeSubstAndHeapEnv with
+       let substAndHeapEnv =
+         computeLocSubst typeEnv heapEnv allLocs tArgsActual tArgsExpected h1 in
+       match substAndHeapEnv with
         | None -> Err (eTcErr "couldn't infer instantiations" (eApp eFun eArgs))
         | Some (subst, heapEnv) ->
-            let applySubst = function
-              | TRefLoc LVar lv when List.mem_assoc lv subst ->
-                  TRefLoc (List.assoc lv subst)
-              | t -> t in
-            let applySubstToHeap =
-              List.map (fun (l,lb) ->
-                let l =
-                  match l with
-                   | LVar lv when List.mem_assoc lv subst -> List.assoc lv subst
-                   | _ -> l
-                in (l, lb) (* TODO need to recurse into bindings? *)
-              ) in
-            let tArgsExpected = List.map (mapTyp applySubst) tArgsExpected in
+            let tArgsExpected = List.map (applySubst subst) tArgsExpected in
             let obligations = List.combine tArgsActual tArgsExpected in
             let (eArgs,allOk) =
               List.fold_left (fun (eArgs,acc) (eArg,(tActual,tExpected)) ->
@@ -932,16 +963,18 @@ and tcAppPoly typeEnv heapEnv outFun eFun eArgs arrow =
                      (eArgs @ [eTcErr err eArg], false)
               ) ([], true) (List.combine eArgs obligations)
             in
-            let (h1,h2) = (applySubstToHeap h1, applySubstToHeap h2) in
+            let h1 = applySubstToHeap subst h1 in
             if not allOk then
               Err (eApp eFun eArgs)
             else if not (heapSat heapEnv h1) then
               let err = "input heap not satisfied" in
               Err (eTcErr err (eApp eFun eArgs))
             else
+              let substFresh = freshen someLocs in
+              let tRet = applySubst (subst @ substFresh) tRet in 
+              let h2 = applySubstToHeap (subst @ substFresh) h2 in
               let heapEnv = removeHeap heapEnv h1 in
               let heapEnv = addHeap heapEnv h2 in
-              let tRet = mapTyp applySubst tRet in 
               let ptRet = addExists existentialLocs (Typ tRet) in
               Ok (eApp eFun eArgs, (ptRet, heapEnv, out))
 
@@ -1050,17 +1083,27 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
             | Exists _ -> assert false
             | OpenArrow _ -> Err (sTcErr "return exp has open type" (sRet e))
             | Typ(t) ->
-                let (tExpected,hExpected) = TypeEnv.lookupRetWorld typeEnv in
-                run coerceOrFold (true, typeEnv, heapEnv, e, t, tExpected)
-                  (fun e -> Err (sRet e))
-                  (fun e (heapEnv,out') ->
-                     if not (heapSat heapEnv hExpected) then
-                       let err = "expected heap not satisfied" in
-                       Err (sRet (eTcErr err e))
-                     else
-                       let out = MoreOut.combine out out' in
-                       let out = MoreOut.addRetType t out in
-                       Ok (sRet e, (addExists locs (Typ TBot), heapEnv, out))))
+                let (someLocs,tGoal,hGoal) = TypeEnv.lookupRetWorld typeEnv in
+                let substAndHeapEnv =
+                  computeLocSubst typeEnv heapEnv someLocs [t] [tGoal] hGoal in
+                (match substAndHeapEnv with
+                  | None ->
+                      let err = "couldn't infer instantations at return" in
+                      Err (sRet (eTcErr err e))
+                  | Some (subst, heapEnv) ->
+                      let tGoal = applySubst subst tGoal in
+                      let hGoal = applySubstToHeap subst hGoal in
+                      run coerceOrFold (true, typeEnv, heapEnv, e, t, tGoal)
+                        (fun e -> Err (sRet e))
+                        (fun e (heapEnv,out') ->
+                           if not (heapSat heapEnv hGoal) then
+                             let err = "expected heap not satisfied" in
+                             Err (sRet (eTcErr err e))
+                           else
+                             let out = MoreOut.combine out out' in
+                             let out = MoreOut.addRetType t out in
+                             let ptBot = addExists locs (Typ TBot) in
+                             Ok (sRet e, (ptBot, heapEnv, out)))))
 
     (* combination of SVarDecl, SVarAssign, EObj, and SSeq rules in order
        to allocate the object at Lx_%d *)

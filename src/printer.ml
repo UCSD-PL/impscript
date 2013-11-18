@@ -26,7 +26,7 @@ let rec strTyp = function
   | TExistsRef(l,mu) -> spr "exists *%s: %s. ref %s" l (strMu mu) l
   | TMaybe(t) -> spr "?(%s)" (strTyp t)
 
-and strArrow (allLocs,tArgs,h1,someLocs,tRet,h2) flag =
+and strArrow ((allLocs,tArgs,h1),(someLocs,tRet,h2)) flag =
   let input = spr "%s%s%s"
     (if allLocs = [] then "" else spr "all %s. " (commas allLocs))
     (commas (List.map strTyp tArgs))
@@ -105,7 +105,7 @@ let rec strExp k exp = match exp.exp with
       (tab k)
   (* TODO attach poly arrow inline with func def *)
   (* | EAs({exp=EFun(xs,body)},(Typ(TArrow(tArgs,tRet)) as tArrow)) -> *)
-  | EAs({exp=EFun(xs,body)},(Typ(TArrow([],tArgs,[],[],tRet,[])) as tArrow)) ->
+  | EAs({exp=EFun(xs,body)},(Typ(TArrow(([],tArgs,[]),([],tRet,[]))) as tArrow)) ->
       if List.length xs <> List.length tArgs then strEAs k exp tArrow
       else strFunAs k xs body RelySet.empty tArgs tRet
   | EAs({exp=EFun(xs,body)},(OpenArrow(r,tArgs,tRet) as tArrow)) ->

@@ -11,7 +11,7 @@ let eUndef         = wrapExp (EBase (VUndef))
 let eVar x         = wrapExp (EVarRead x)
 let eApp e es      = wrapExp (EApp (e, es))
 let eAs e t        = wrapExp (EAs (e, t))
-let eCast s t      = wrapExp (ECast ([], [s], [], [], t, []))
+let eCast s t      = wrapExp (ECast (([], [s], []), ([], t, [])))
 let ePolyCast arr  = wrapExp (ECast arr)
 let eObj l         = wrapExp (EObj l)
 let eGet e1 e2     = wrapExp (EObjRead (e1, e2))
@@ -61,7 +61,7 @@ let tUnion ts =
     (* instead of just removeDupes, might want to look for
        equivalent types like reordered unions *)
 
-let pureArrow tArgs tRet = TArrow ([], tArgs, [], [], tRet, [])
+let pureArrow tArgs tRet = TArrow (([], tArgs, []), ([], tRet, []))
 
 let ptArrow r tArgs tRet =
   if RelySet.is_empty r then Typ (pureArrow tArgs tRet)
@@ -110,10 +110,10 @@ and mapStmt_ fE fS = function
 
 let rec mapTyp fT = function
   | TBase(bt) -> fT (TBase bt)
-  | TArrow(allLocs,ts,h1,someLocs,t,h2) ->
+  | TArrow((allLocs,ts,h1),(someLocs,t,h2)) ->
       let (ts,t) = (List.map (mapTyp fT) ts, mapTyp fT t) in
       let (h1,h2) = (mapHeap fT h1, mapHeap fT h2) in
-      fT (TArrow (allLocs, ts, h1, someLocs, t, h2))
+      fT (TArrow ((allLocs, ts, h1), (someLocs, t, h2)))
   | TUnion(ts) -> fT (TUnion (List.map (mapTyp fT) ts))
   | TAny -> fT TAny
   | TBot -> fT TBot

@@ -429,7 +429,7 @@ fun t ->
     | Some _ ->
         let x = "L_" in
         let tx = TRefLoc (LVar x) in
-        Some (ePolyCast ([x], [TMaybe tx], [], [], tx, []))
+        Some (ePolyCast (([x], [TMaybe tx], []), ([], tx, [])))
 
 let synthesizeRecd : recd_type -> exp option =
 fun (TRecd(width,fts)) ->
@@ -626,7 +626,7 @@ let rec tcExp (typeEnv, heapEnv, exp) = match exp.exp with
   | EFun(xs,body) ->
       tcBareFun typeEnv heapEnv xs body
 
-  | EAs({exp=EFun(xs,body)},Typ(TArrow([],tArgs,[],[],tRet,[]))) ->
+  | EAs({exp=EFun(xs,body)},Typ(TArrow(([],tArgs,[]),([],tRet,[])))) ->
       tcAnnotatedFun typeEnv heapEnv xs body RelySet.empty tArgs tRet
 
   | EAs({exp=EFun(xs,body)},OpenArrow(r,tArgs,tRet)) ->
@@ -655,7 +655,7 @@ let rec tcExp (typeEnv, heapEnv, exp) = match exp.exp with
                       Err (eApp (eTcErrRetry err eFun sRetry) eArgs)
                   | _ -> 
                       Err (eApp (eTcErr err eFun) eArgs))
-            | Typ(TArrow([],tArgs,[],[],tRet,[])) ->
+            | Typ(TArrow(([],tArgs,[]),([],tRet,[]))) ->
                 tcApp1 typeEnv heapEnv outFun eFun eArgs tArgs tRet
             | Typ(TArrow(arrow)) ->
                 tcAppPoly typeEnv heapEnv outFun eFun eArgs arrow
@@ -844,7 +844,7 @@ and tcAnnotatedFun typeEnv heapEnv xs body rely tArgs tRet =
               Err (eAs (eFun xs (sTcErr err body)) origArrow))
 
 and tcAnnotatedPolyFun typeEnv heapEnv xs body arrow =
-  let (allLocs,tArgs,h1,someLocs,tRet,h2) = arrow in
+  let ((allLocs,tArgs,h1),(someLocs,tRet,h2)) = arrow in
   let tArrow = TArrow arrow in
   let ptArrow = Typ tArrow in
   if not (wellFormed typeEnv tArrow) then
@@ -923,7 +923,7 @@ and tcApp1 typeEnv heapEnv outFun eFun eArgs tArgs tRet =
         Ok (eApp eFun eArgs, (Typ tRet, heapEnv, out)))
 
 and tcAppPoly typeEnv heapEnv outFun eFun eArgs arrow =
-  let (allLocs,tArgsExpected,h1,someLocs,tRet,h2) = arrow in
+  let ((allLocs,tArgsExpected,h1),(someLocs,tRet,h2)) = arrow in
   let (eArgs,maybeOutput) =
     List.fold_left (fun (eArgs,maybeOutput) eArg ->
       match maybeOutput with

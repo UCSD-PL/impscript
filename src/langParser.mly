@@ -43,11 +43,6 @@ let rec stmtOfBlock : block -> stmt = function
       let (s1,s2) = (stmtOfBlock s1, stmtOfBlock s2) in
       sSeq [sIf e s1 s2; stmtOfBlock l]
 
-let arrowOf inputs outputs =
-  let (allLocs,tArgs,h1) = inputs in
-  let (someLocs,tRet,h2) = outputs in
-  (allLocs, tArgs, h1, someLocs, tRet, h2)
-
 let withDefault default opt = match opt with None -> default | Some x -> x
 
 %}
@@ -139,7 +134,7 @@ exp_ :
              in
              let arrow =
                if RelySet.is_empty r
-               then Typ (TArrow (allLocs,tArgs,h1,someLocs,tRet,h2))
+               then Typ (TArrow ((allLocs,tArgs,h1),(someLocs,tRet,h2)))
                else match allLocs, h1, someLocs, h2 with
                  | [], [], [], [] -> ptArrow r tArgs tRet
                  | _ -> failwith "TODO allow effectful open functions"
@@ -192,11 +187,10 @@ field_type :
  | DOTS              { ("...", TBot) }
 
 arrow_type :
- | LPAREN x=input_world RPAREN ARROW
-   LPAREN y=output_world RPAREN         { arrowOf x y }
+ | LPAREN x=input_world RPAREN ARROW LPAREN y=output_world RPAREN { (x, y) }
 
 arrow_cast :
- | x=input_world EQARROW y=output_world { arrowOf x y }
+ | x=input_world EQARROW y=output_world { (x, y) }
 
 input_world :
  | ls=option(all_locs) ts=separated_list(COMMA,typ) h=option(slash_heap) 

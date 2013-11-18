@@ -134,8 +134,8 @@ exp_ :
              let arrow = ((allLocs, tArgs, h1), (someLocs, tRet, h2)) in
              let rely =
                match f, RelySet.is_empty r with
-                 | None,   _    -> r
-                 | Some f, true -> RelySet.singleton (f, TArrow arrow)
+                 | None  , _     -> r
+                 | Some f, true  -> RelySet.singleton (f, TArrow arrow)
                  | Some _, false ->
                      Log.printParseErr "bad recursive function annotation" in
              let ptArrow = finishArrow rely arrow in

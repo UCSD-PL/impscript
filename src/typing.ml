@@ -1198,7 +1198,7 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
                  Ok (sIf e1 s2 s3, (Typ tJoin, hJoin, out)))))
 
   | SWhile(e,s) ->
-      run tcCoerce (typeEnv, heapEnv, e, tBool)
+      run tcCoerceLocally (typeEnv, heapEnv, e, tBool)
         (fun e -> Err (sWhile e s))
         (fun e (heapEnv1,out1) ->
            if not (HeapEnv.equal heapEnv heapEnv1)

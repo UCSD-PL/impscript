@@ -22,8 +22,9 @@ let rec strTyp = function
   (* | TRefLoc(l) -> spr "ref(%s)" (strLoc l) *)
   (* | TRefLoc(l) -> spr "<%s>" (strLoc l) *)
   | TRefLoc(l) -> spr "*%s" (strLoc l)
-  | TExistsRef("L",MuVar(x)) -> x
-  | TExistsRef(l,mu) -> spr "exists *%s: %s. ref %s" l (strMu mu) l
+  | TExistsRef(_,mu) -> spr "ref(%s)" (strMu mu)
+  (* | TExistsRef("L",MuVar(x)) -> x *)
+  (* | TExistsRef(l,mu) -> spr "exists *%s: %s. ref %s" l (strMu mu) l *)
   | TMaybe(t) -> spr "?(%s)" (strTyp t)
 
 and strArrow ((allLocs,tArgs,h1),(someLocs,tRet,h2)) flag =

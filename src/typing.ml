@@ -199,7 +199,7 @@ fun heapEnv ->
                       then Some (HeapEnv.removeLoc locWitness heapEnv)
                       else None))
 
-let recdSub_ : ('a -> typ -> typ -> 'a) -> 'a -> 'a
+let recdSub_ : ('a -> field -> typ -> typ -> 'a) -> 'a -> 'a
             -> recd_type -> recd_type -> 'a =
 fun foo initSuccessResult failureResult rt1 rt2 ->
   let TRecd(width1,fts1) = rt1 in
@@ -213,15 +213,15 @@ fun foo initSuccessResult failureResult rt1 rt2 ->
   in
   if not widthOkay then failureResult
   else List.fold_left
-         (fun acc (f,t2) -> let t1 = List.assoc f fts1 in foo acc t1 t2)
+         (fun acc (f,t2) -> let t1 = List.assoc f fts1 in foo acc f t1 t2)
          initSuccessResult fts2
 
 let recdSub =
-  recdSub_ (fun acc s t -> acc && sub s t) true false
+  recdSub_ (fun acc _ s t -> acc && sub s t) true false
 
 let recdSubAndPack heapEnv =
   recdSub_
-    (fun acc s t -> ifSome acc (fun heapEnv -> subAndPack heapEnv s t))
+    (fun acc _ s t -> ifSome acc (fun heapEnv -> subAndPack heapEnv s t))
     (Some heapEnv) None
 
 let heapSat : HeapEnv.t -> heap -> bool =
@@ -566,6 +566,118 @@ let sAssignLval lv e =
         let fs = List.rev fs in
         let (hd,tl) = (List.hd fs, List.tl fs) in
         sSet (eLval (LvalPath (x, List.rev tl))) (eStr hd) e
+
+let addPath lv path =
+  match lv with
+    | LvalVar x -> LvalPath (x, path)
+    | LvalPath (x, path0) -> LvalPath (x, path0 @ path)
+
+type 'a tri_result = Yes | No | YesIf of 'a
+
+let resultAppend
+    : 'a list tri_result -> 'a list tri_result -> 'a list tri_result =
+fun x y -> match x, y with
+  | No       , _        -> No
+  | Yes      , _        -> y
+  | YesIf _  , No       -> No
+  | YesIf l  , Yes      -> YesIf l
+  | YesIf l1 , YesIf l2 -> YesIf (l1 @ l2)
+
+let resultAdd 
+    : 'a list tri_result -> 'a -> 'a list tri_result =
+fun x y -> match x with
+  | No      -> No
+  | Yes     -> YesIf [y]
+  | YesIf l -> YesIf (l @ [y])
+
+type path             = field list
+type path_list        = (path * mu_type) list
+type rooted_path_list = loc * mu_type * path_list
+
+let rec subAndFold
+    : TypeEnv.t -> HeapEnv.t -> path -> typ -> typ
+   -> path_list tri_result =
+fun typeEnv heapEnv path ->
+  sub_ (fun () -> Yes)
+       (fun () -> No)
+       (Some (fun (locWitness, _, muExists) ->
+                let rt2 = unrollMu typeEnv muExists in
+                match HeapEnv.lookupLoc locWitness heapEnv with
+                  | None -> No
+                  | Some HRecd rt1 ->
+                      let res = recdSubAndFold typeEnv heapEnv path rt1 rt2 in
+                      resultAppend res (YesIf [(path, muExists)])
+                  | Some HMu mu ->
+                      if mu = muExists (* TODO more permissive test? *)
+                      then Yes
+                      else No))
+
+and recdSubAndFold
+    : TypeEnv.t -> HeapEnv.t -> path -> recd_type -> recd_type
+   -> path_list tri_result =
+fun typeEnv heapEnv path ->
+  recdSub_ (fun acc f s t ->
+    resultAppend acc (subAndFold typeEnv heapEnv (path @ [f]) s t)
+  ) Yes No
+
+let heapSat_
+    : TypeEnv.t -> HeapEnv.t -> heap -> rooted_path_list list tri_result =
+fun typeEnv heapEnv heap ->
+  List.fold_left (fun acc (l,lb) ->
+    match HeapEnv.lookupLoc l heapEnv, lb, !Settings.castInsertionMode with
+      (* TODO more permissive tests? *)
+      | Some HRecd rt1, HRecd rt2, _ when rt1 = rt2 -> acc
+      | Some HMu mu1, HMu mu2, _ when mu1 = mu2 -> acc
+      | Some HRecd rt1, HMu mu, true ->
+          let root = [] in
+          let rt2 = unrollMu typeEnv mu in
+          (match recdSubAndFold typeEnv heapEnv root rt1 rt2 with
+            | YesIf pathList -> resultAdd acc (l, mu, pathList)
+            | Yes            -> resultAdd acc (l, mu, [])
+            | No             -> No)
+      | _ -> No
+  ) Yes heap
+
+let inferFolds : (exp * typ) list -> rooted_path_list list -> stmt option =
+fun ets lists ->
+  let processOne ((e, t), (locRoot, muRoot, pathLists)) =
+    match t, lvalOf e with
+      | TRefLoc l, Some lv when l = locRoot ->
+          (* want longest paths first, so that inner objects are folded
+             up before outer ones *)
+          let pathLists = List.rev (List.sort compare pathLists) in
+          let pathLists = pathLists @ [([], muRoot)] in
+          let folds = List.map
+                        (fun (path,mu) -> eFold mu (eLval (addPath lv path)))
+                        pathLists in
+          Some folds
+      | _ ->
+          None
+  in
+  let l = List.map processOne (List.combine ets lists) in
+  match Utils.flattenSomeLists l with
+    | None -> None
+    | Some folds ->
+        let sFolds = List.map sTcInsert (List.map sExp folds) in
+        let sRetry = Some (sSeq sFolds) in
+        sRetry
+
+let rec sequenceOfTcInserts : stmt -> bool =
+function
+  | {stmt=SSeq({stmt=STcInsert _},s)} -> sequenceOfTcInserts s
+  | {stmt=STcInsert _}                -> true
+  | _                                 -> false
+
+let heapSatWithFolds
+    : TypeEnv.t -> HeapEnv.t -> heap -> (exp * typ) list -> stmt tri_result =
+fun typeEnv heapEnv hGoal ets ->
+  match heapSat_ typeEnv heapEnv hGoal with
+    | No -> No
+    | Yes -> Yes
+    | YesIf rootedPathLists ->
+        (match inferFolds ets rootedPathLists with
+           | None -> No
+           | Some sRetry -> YesIf sRetry)
 
 type ('a, 'b) result =
   | Ok of 'a * 'b
@@ -1066,6 +1178,8 @@ and _tcStmt (typeEnv, heapEnv, stmt) =
               result
           | Err _, {stmt=SClose(xs,s0)} when s0 = sHole ->
               tcStmt (typeEnv, heapEnv, sTcInsert (sClose xs stmt))
+          | Err _, _ when sequenceOfTcInserts sRetry -> (* don't re-wrap *)
+              tcStmt (typeEnv, heapEnv, sSeq [sRetry; stmt])
           | Err _, _ ->
               tcStmt (typeEnv, heapEnv, sSeq [sTcInsert sRetry; stmt])
       ) (Err stmtErr) retryStmts
@@ -1102,14 +1216,18 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
                       run coerceOrFold (true, typeEnv, heapEnv, e, t, tGoal)
                         (fun e -> Err (sRet e))
                         (fun e (heapEnv,out') ->
-                           if not (heapSat heapEnv hGoal) then
-                             let err = "expected heap not satisfied" in
-                             Err (sRet (eTcErr err e))
-                           else
-                             let out = MoreOut.combine out out' in
-                             let out = MoreOut.addRetType t out in
-                             let ptBot = addExists locs (Typ TBot) in
-                             Ok (sRet e, (ptBot, heapEnv, out)))))
+                           let err = "expected heap not satisfied" in
+                           let ets = [(e,t)] in
+                           match heapSatWithFolds typeEnv heapEnv hGoal ets with
+                             | No ->
+                                 Err (sRet (eTcErr err e))
+                             | YesIf sRetry ->
+                                 Err (sRet (eTcErrRetry err e sRetry))
+                             | Yes ->
+                                 let out = MoreOut.combine out out' in
+                                 let out = MoreOut.addRetType t out in
+                                 let ptBot = addExists locs (Typ TBot) in
+                                 Ok (sRet e, (ptBot, heapEnv, out)))))
 
     (* combination of SVarDecl, SVarAssign, EObj, and SSeq rules in order
        to allocate the object at Lx_%d *)

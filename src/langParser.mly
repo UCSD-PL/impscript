@@ -153,7 +153,10 @@ typ :
 
  (* | LPAREN s=typ PIPE ts=separated_list(PIPE,typ) RPAREN { tUnion (s::ts) } *)
 
+ (* TODO get rid of this *)
  | x=TVAR                         { TExistsRef ("L", MuVar x) }
+
+ | REF LPAREN mu=mu_type RPAREN   { TExistsRef ("L", mu) }
  | REF LPAREN l=loc RPAREN        { TRefLoc l }
  | LT l=loc GT                    { TRefLoc l }
  | STAR l=loc                     { TRefLoc l }
@@ -161,6 +164,7 @@ typ :
 
 mu_type : 
  | m=mu_type_def                                    { m }
+ | x=TVAR                                           { MuVar x }
  | x=VAR                                            { MuAbbrev (x, []) }
  | x=VAR LPAREN ts=separated_list(COMMA,typ) RPAREN { MuAbbrev (x, ts) }
 

@@ -1,0 +1,6 @@
+var f; f = function () {
+  var x; x = {};
+  x.f = 1;
+  [fold (mu 'blah. {f: num}, x);]
+  return x;
+} as (() -> (some L. *L / *L: mu 'blah. {f: num}));

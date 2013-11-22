@@ -7,6 +7,14 @@ module IntSet = Set.Make (struct type t = int let compare = compare end)
 let removeDupes l =
   List.fold_left (fun acc x -> if List.mem x acc then acc else x::acc) [] l
 
+let flattenSomeLists : ('a list option) list -> 'a list option =
+fun los ->
+  List.fold_left (fun acc lo ->
+    match acc, lo with
+      | Some l1, Some l2 -> Some (l1 @ l2)
+      | _ -> None
+  ) (Some []) los
+
 let strPrefix s pre =
   let n = String.length s in
   let m = String.length pre in

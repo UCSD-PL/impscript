@@ -15,20 +15,23 @@ val run : ('c -> ('a, 'b) result)
            -> ('a -> 'b -> ('a, 'b) result)
            -> ('a, 'b) result
 
-val sub       : typ -> typ -> bool
+val sub    : typ -> typ -> bool
 
-val join      : typ -> typ -> typ
+val join   : typ -> typ -> typ
 
-val coerce    : (exp * typ * typ) -> (exp, bool) result
+val coerce : (exp * typ * typ) -> (exp, bool) result
 
-val tcExp     : (TypeEnv.t * HeapEnv.t * exp)
-                  -> (exp, pre_type * HeapEnv.t * MoreOut.t) result
+val tcExp
+  : (TypeEnv.t * HeapEnv.t * exp)
+ -> (exp, pre_type * HeapEnv.t * MoreOut.t) result
 
-val tcStmt    : (TypeEnv.t * HeapEnv.t * stmt)
-                  -> (stmt, pre_type * HeapEnv.t * MoreOut.t) result
+val tcStmt
+  : (TypeEnv.t * HeapEnv.t * stmt)
+ -> (stmt, pre_type * HeapEnv.t * MoreOut.t) result
 
-val tcCoerce  : (TypeEnv.t * HeapEnv.t * exp * typ)
-                  -> (exp, HeapEnv.t * MoreOut.t) result
+val tcAndCoerce
+  : (TypeEnv.t * HeapEnv.t * exp * typ)
+ -> (exp, HeapEnv.t * MoreOut.t) result
 
 val typecheck : stmt -> (stmt, unit) result
 

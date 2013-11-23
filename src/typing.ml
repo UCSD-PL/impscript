@@ -1095,7 +1095,7 @@ and tcApp1 typeEnv heapEnv outFun eFun eArgs tArgs tRet =
       match maybeOutput with
        | None -> (eArgs @ [eArg], None)
        | Some(heapEnv,out) ->
-           run tcCoerce (typeEnv, heapEnv, eArg, tArg)
+           run tcAndCoerce (typeEnv, heapEnv, eArg, tArg)
              (fun eArg -> (eArgs @ [eArg], None))
              (fun eArg (heapEnv,out') ->
                 let out = MoreOut.combine out out' in
@@ -1260,7 +1260,7 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
         (fun e (_,heapEnv,out) -> Ok (sExp e, (Typ tUndef, heapEnv, out)))
 
   | SReturn(e) ->
-      (* not just calling tcCoerce, because want to add synthesized
+      (* not just calling tcAndCoerce, because want to add synthesized
          return type to output *)
       let heapEnvOrig = heapEnv in
       let eOrig = e in
@@ -1282,7 +1282,7 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
                   | Some (subst, heapEnv) ->
                       let tGoal = applySubst subst tGoal in
                       let hGoal = applySubstToHeap subst hGoal in
-                      run coerceOrFold (true, typeEnv, heapEnv, e, t, tGoal)
+                      run tcCoerce (true, typeEnv, heapEnv, e, t, tGoal)
                         (fun e -> Err (sRet e))
                         (fun e (heapEnv,out') ->
                            let err = "expected heap not satisfied" in
@@ -1345,7 +1345,7 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
         | None -> errS (spr "var [%s] isn't defined" x) stmt
         | Some(Val _) -> errS (spr "val [%s] is not assignable" x) stmt
         | Some(InvariantRef(t)) ->
-            run tcCoerce (typeEnv, heapEnv, e, t)
+            run tcAndCoerce (typeEnv, heapEnv, e, t)
               (fun e -> Err (sAssign x e))
               (fun e (heapEnv,out) -> Ok (sAssign x e, (Typ t, heapEnv, out)))
         | Some(StrongRef) ->
@@ -1376,7 +1376,7 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
 
   | SIf(e1,s2,s3) ->
       (* requiring boolean guard for now *)
-      run tcCoerceLocally (typeEnv, heapEnv, e1, tBool)
+      run tcAndCoerceLocally (typeEnv, heapEnv, e1, tBool)
         (fun e1 -> Err (sIf e1 s2 s3))
         (fun e1 (heapEnv,out1) -> run tcStmt (typeEnv, heapEnv, s2)
            (fun s2 -> Err (sIf e1 s2 s3))
@@ -1392,7 +1392,7 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
                  Ok (sIf e1 s2 s3, (Typ tJoin, hJoin, out)))))
 
   | SWhile(e,s) ->
-      run tcCoerceLocally (typeEnv, heapEnv, e, tBool)
+      run tcAndCoerceLocally (typeEnv, heapEnv, e, tBool)
         (fun e -> Err (sWhile e s))
         (fun e (heapEnv1,out1) ->
            if not (HeapEnv.equal heapEnv heapEnv1)
@@ -1533,10 +1533,10 @@ and runTcExp3 (typeEnv, heapEnv) (e1, e2, e3) fError fOk =
 
 (* TODO a general tcExpN version for app1, app2, and eobj *)
 
-and tcCoerce args          = _tcCoerce true args
-and tcCoerceLocally args   = _tcCoerce false args
+and tcAndCoerce args          = _tcAndCoerce true args
+and tcAndCoerceLocally args   = _tcAndCoerce false args
 
-and _tcCoerce hoistCasts (typeEnv, heapEnv, e, tGoal) =
+and _tcAndCoerce hoistCasts (typeEnv, heapEnv, e, tGoal) =
   run tcExp (typeEnv, heapEnv, e)
     (fun e -> Err e)
     (fun e (pt,heapEnv,out) ->
@@ -1545,30 +1545,15 @@ and _tcCoerce hoistCasts (typeEnv, heapEnv, e, tGoal) =
         | Exists _ -> assert false
         | OpenArrow _ -> errE "cannot coerce from open arrow" e
         | Typ(t) ->
-            run coerceOrFold (hoistCasts, typeEnv, heapEnv, e, t, tGoal)
+            run tcCoerce (hoistCasts, typeEnv, heapEnv, e, t, tGoal)
               (fun e -> Err e)
               (fun e (heapEnv,out') ->
                  let out = MoreOut.combine out out' in
                  Ok (e, (heapEnv, out))))
 
-and coerceOrFold (hoistCasts, typeEnv, heapEnv, e, t, tGoal) =
+and tcCoerce (hoistCasts, typeEnv, heapEnv, e, t, tGoal) =
   run coerce (e, t, tGoal)
-    (fun eErr ->
-       match t, tGoal, hoistCasts, lvalOf e with
-        (* TODO
-        | TRefLoc _, TMaybe(TRefMu(mu)), true, Some(lv)
-        | TRefLoc _, TRefMu(mu), true, Some(lv) ->
-            let sRetry = sExp lv (eFold mu (eLval lv)) in
-            Err (eTcErrRetry "blah" e sRetry)
-        | TRefLoc _, TMaybe(TRefMu(mu)), _, _
-        | TRefLoc _, TRefMu(mu), _, _ ->
-            run tcExp (typeEnv, heapEnv, eFold mu e)
-              (fun _ -> Err e)
-              (fun _ (_,heapEnv,out) ->
-                 Ok (eTcInsert (eFold mu e), (heapEnv, out)))
-        *)
-        | _ ->
-            Err eErr)
+    (fun eErr -> Err eErr)
     (fun eOk insertedCast ->
        (* if coercion inserted, hoist it out to an assignment if
           possible rather than inserting the cast locally *)

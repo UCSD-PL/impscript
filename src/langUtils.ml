@@ -18,6 +18,7 @@ let eGet e1 e2     = wrapExp (EObjRead (e1, e2))
 let eFold mu e     = wrapExp (EFold (mu, e))
 let eUnfold mu e   = wrapExp (EUnfold (mu, e))
 let eTcInsert e    = wrapExp (ETcInsert e)
+let eLet x e1 e2   = wrapExp (ELet (x, e1, e2))
 
 let wrapStmt s     = { stmt = s }
 let sRet e         = wrapStmt (SReturn e)
@@ -89,6 +90,7 @@ and mapExp_ fE fS = function
   | EObjRead(e1,e2) -> fE (EObjRead (mapExp fE fS e1, mapExp fE fS e2))
   | EFold(mu,e) -> fE (EFold (mu, mapExp fE fS e))
   | EUnfold(mu,e) -> fE (EUnfold (mu, mapExp fE fS e))
+  | ELet(x,e1,e2) -> fE (ELet (x, mapExp fE fS e1, mapExp fE fS e2))
 
 and mapStmt_ fE fS = function
   | SExp(e) -> fS (SExp (mapExp fE fS e))
@@ -166,6 +168,9 @@ and foldExp_ fE fS acc = function
   | EUnfold(mu,e) ->
       let acc = foldExp fE fS acc e in
       fE acc (EUnfold (mu, e))
+  | ELet(x,e1,e2) ->
+      let acc = List.fold_left (foldExp fE fS) acc [e1;e2] in
+      fE acc (ELet (x, e1, e2))
 
 and foldStmt_ fE fS acc = function
   | SExp(e) ->

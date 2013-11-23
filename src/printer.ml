@@ -125,6 +125,7 @@ let rec strExp k exp = match exp.exp with
         | None -> spr "%s[%s]" (strExp k e1) (strExp k e2))
   | EFold(mu,e) -> spr "fold (%s, %s)" (strMu mu) (strExp k e)
   | EUnfold(mu,e) -> spr "unfold (%s, %s)" (strMu mu) (strExp k e)
+  | ELet(x,e1,e2) -> spr "let %s = %s in (%s)" x (strExp k e1) (strExp k e2)
 
 (* TODO *)
 and strFunAs k xs body h tArgs tRet =
@@ -218,3 +219,4 @@ let rec strExpAst exp = match exp.exp with
   | EObjRead _ -> "EObjRead(...)"
   | EFold _ -> "EFold(...)"
   | EUnfold _ -> "EUnfold(...)"
+  | ELet _ -> "ELet(...)"

@@ -82,6 +82,7 @@ type exp_ =
   | ECast of arrow
   | ETcErr of string * exp * stmt option (* stmt option for backtracking *)
   | ETcInsert of exp
+  | ELet of var * exp * exp
 
 and stmt_ =
   | SExp of exp

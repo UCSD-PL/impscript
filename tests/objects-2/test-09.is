@@ -1,0 +1,6 @@
+type numlist = mu 'x. {hd: num, tl: ?(ref('x))};
+
+var f; f = function (all L. xs:*L / *L: numlist) -> (num / *L: numlist) {
+  [unfold (numlist, xs);]
+  return [let __1 = xs.hd in (let _ = fold (numlist, xs) in (__1))];
+};

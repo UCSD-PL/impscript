@@ -149,6 +149,11 @@ let (genLocVar,clearLocVarCounter) =
   (fun ?(name="") () -> incr i; spr "L%s_%d" name !i),
   (fun () -> i := 0)
 
+let (genSym,clearTmpCounter) =
+  let i = ref 0 in
+  (fun ?(name="") () -> incr i; spr "__%s%d" name !i),
+  (fun () -> i := 0)
+
 let projTyp = function
   | Typ(t) -> t
   | _ -> failwith "projTyp"
@@ -638,29 +643,67 @@ fun typeEnv heapEnv heap ->
       | _ -> No
   ) Yes heap
 
-let inferFolds : (exp * typ) list -> rooted_path_list list -> stmt option =
-fun ets lists ->
-  let processOne ((e, t), (locRoot, muRoot, pathLists)) =
-    match t, lvalOf e with
-      | TRefLoc l, Some lv when l = locRoot ->
-          (* want longest paths first, so that inner objects are folded
-             up before outer ones *)
-          let pathLists = List.rev (List.sort compare pathLists) in
-          let pathLists = pathLists @ [([], muRoot)] in
-          let folds = List.map
-                        (fun (path,mu) -> eFold mu (eLval (addPath lv path)))
-                        pathLists in
-          Some folds
+type inferred_folds = bool * exp list (* true if all folds can be lifted out *)
+
+let inferFolds
+    : TypeEnv.t -> HeapEnv.t -> (exp * typ) list -> rooted_path_list list
+   -> inferred_folds option =
+fun typeEnv heapEnv ets lists ->
+
+  let makeFolds lvRoot locRoot muRoot pathLists =
+    (* want longest paths first, so that inner objects are folded
+       up before outer ones *)
+    let pathLists = List.rev (List.sort compare pathLists) in
+    let pathLists = pathLists @ [([], muRoot)] in
+    List.map
+      (fun (path,mu) -> eFold mu (eLval (addPath lvRoot path)))
+      pathLists in
+
+  let foldFromArgs (locRoot, muRoot, pathLists) : exp list option =
+    List.fold_left (fun acc (e,t) ->
+      match acc, t, lvalOf e with
+        | Some _, _, _ -> acc
+        | None, TRefLoc l, Some lv when l = locRoot ->
+            Some (makeFolds lv locRoot muRoot pathLists)
+        | _ -> None
+    ) None ets in
+
+  let foldFromEnv (locRoot, muRoot, pathLists) : exp list option =
+    VarMap.fold (fun x t acc ->
+      ifNone acc (fun () ->
+        match t with
+          | Val TRefLoc l | InvariantRef TRefLoc l when l = locRoot ->
+              Some (makeFolds (LvalVar x) locRoot muRoot pathLists)
+          | StrongRef ->
+              (match HeapEnv.lookupVar x heapEnv with
+                 | Some Typ TRefLoc l when l = locRoot ->
+                     Some (makeFolds (LvalVar x) locRoot muRoot pathLists)
+                 | _ -> None)
+          | _ -> None)
+    ) typeEnv.TypeEnv.bindings None in
+
+  List.fold_left (fun acc rootedPathList ->
+    match acc, foldFromArgs rootedPathList, foldFromEnv rootedPathList with
+      | Some (canLiftAll, l), Some folds, _ ->
+          Some (canLiftAll && true, l @ folds)
+      | Some (canLiftAll, l), None, Some folds ->
+          Some (canLiftAll && false, l @ folds)
       | _ ->
           None
+  ) (Some (true, [])) lists  
+
+let retryStmtForFolds folds =
+  let sFolds = List.map sTcInsert (List.map sExp folds) in
+  let sRetry = sSeq sFolds in
+  sRetry
+
+let inlineExpForFolds folds e =
+  let x = genSym () in
+  let rec foo = function
+    | []    -> eVar x
+    | e::es -> eLet "_" e (foo es)
   in
-  let l = List.map processOne (List.combine ets lists) in
-  match Utils.flattenSomeLists l with
-    | None -> None
-    | Some folds ->
-        let sFolds = List.map sTcInsert (List.map sExp folds) in
-        let sRetry = Some (sSeq sFolds) in
-        sRetry
+  eTcInsert (eLet x e (foo folds))
 
 let rec sequenceOfTcInserts : stmt -> bool =
 function
@@ -669,15 +712,16 @@ function
   | _                                 -> false
 
 let heapSatWithFolds
-    : TypeEnv.t -> HeapEnv.t -> heap -> (exp * typ) list -> stmt tri_result =
+    : TypeEnv.t -> HeapEnv.t -> heap -> (exp * typ) list
+   -> inferred_folds tri_result =
 fun typeEnv heapEnv hGoal ets ->
   match heapSat_ typeEnv heapEnv hGoal with
     | No -> No
     | Yes -> Yes
     | YesIf rootedPathLists ->
-        (match inferFolds ets rootedPathLists with
+        (match inferFolds typeEnv heapEnv ets rootedPathLists with
            | None -> No
-           | Some sRetry -> YesIf sRetry)
+           | Some (canLiftAll, folds) -> YesIf (canLiftAll, folds))
 
 type ('a, 'b) result =
   | Ok of 'a * 'b
@@ -879,6 +923,29 @@ let rec tcExp (typeEnv, heapEnv, exp) = match exp.exp with
       run tcExp (typeEnv, heapEnv, e)
         (fun e -> Err (eTcInsert e))
         (fun e stuff -> Ok (eTcInsert e, stuff))
+
+  | ELet(x,e1,e2) ->
+      if x <> "_" && TypeEnv.memVar x typeEnv
+      then Err (eLet x (eTcErr (spr "var [%s] is already scope" x) e1) e2)
+      else
+        run tcExp (typeEnv, heapEnv, e1)
+          (fun e1 -> Err (eLet x e1 e2))
+          (fun e1 (pt1,heapEnv,out1) ->
+             let (locs1,pt1) = stripExists pt1 in
+             match pt1 with
+              | Exists _ -> assert false
+              | OpenArrow _ -> Err (eLet x (eTcErr "open type" e1) e2)
+              | Typ t1 ->
+                  let typeEnv =
+                    if x = "_" then typeEnv
+                    else TypeEnv.addVar x (Val t1) typeEnv
+                  in
+                  run tcExp (typeEnv, heapEnv, e2)
+                    (fun e2 -> Err (eLet x e1 e2))
+                    (fun e2 (pt2,heapEnv,out2) ->
+                       let out = MoreOut.combine out1 out2 in
+                       let pt2 = addExists locs1 pt2 in
+                       Ok (eLet x e1 e2, (pt2, heapEnv, out))))
 
   | EAs(_,_) ->
       errE "non-function value in ascription" exp
@@ -1195,6 +1262,8 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
   | SReturn(e) ->
       (* not just calling tcCoerce, because want to add synthesized
          return type to output *)
+      let heapEnvOrig = heapEnv in
+      let eOrig = e in
       run tcExp (typeEnv, heapEnv, e)
         (fun e -> Err (sRet e))
         (fun e (pt,heapEnv,out) ->
@@ -1221,8 +1290,15 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
                            match heapSatWithFolds typeEnv heapEnv hGoal ets with
                              | No ->
                                  Err (sRet (eTcErr err e))
-                             | YesIf sRetry ->
+                             | YesIf (true, folds) ->
+                                 let sRetry = retryStmtForFolds folds in
                                  Err (sRet (eTcErrRetry err e sRetry))
+                             | YesIf (false, folds) ->
+                                 (* inline backtracking *)
+                                 let e' = inlineExpForFolds folds eOrig in
+                                 run tcStmt (typeEnv, heapEnvOrig, sRet e')
+                                   (fun _ -> Err (sRet (eTcErr err e)))
+                                   (fun s stuff -> Ok (s, stuff))
                              | Yes ->
                                  let out = MoreOut.combine out out' in
                                  let out = MoreOut.addRetType t out in
@@ -1508,6 +1584,7 @@ let removeTcInserts prog =
     (function
       | EApp({exp=ETcInsert{exp=ECast _}},[eArg]) -> eArg.exp
       | ETcInsert({exp=EFold(_,e)}) -> e.exp
+      | ETcInsert({exp=ELet(_,e,_)}) -> e.exp
       | e -> e)
     (function
       | STcInsert({stmt=SClose(_,s)})

@@ -58,7 +58,7 @@ let withDefault default opt = match opt with None -> default | Some x -> x
 %token
   EOF NULL UNDEF
   IF ELSE COMMA COLON LBRACE RBRACE SEMI LPAREN RPAREN LBRACK RBRACK LT GT
-  (* PIPE *) FUN RET LETREF EQ EQARROW AS ARROW WHILE DOT QMARK TYPE
+  (* PIPE *) FUN RET LET IN LETREF EQ EQARROW AS ARROW WHILE DOT QMARK TYPE
   EXTERN VAL INVARIANT CLOSE FOLD UNFOLD ALL SOME U
   TANY TBOT REF DOTS MU STAR SLASH
 
@@ -110,6 +110,7 @@ exp_ :
  | FOLD LPAREN mu=mu_type COMMA e=exp RPAREN        { EFold (mu, e) }
  | UNFOLD LPAREN mu=mu_type COMMA e=exp RPAREN      { EUnfold (mu, e) }
  | LBRACK e=exp_ RBRACK                             { ETcInsert (wrapExp e) }
+ | LET x=VAR EQ e1=exp IN LPAREN e2=exp RPAREN      { ELet (x, e1, e2) }
 
  | FUN r=option(rely_set)
        f=option(VAR) iw=lambda_input_world

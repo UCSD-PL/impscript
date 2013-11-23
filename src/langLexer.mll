@@ -32,6 +32,8 @@ rule token = parse
 
   | "true"         { VBOOL true }
   | "false"        { VBOOL false }
+  | "let"          { LET }
+  | "in"           { IN }
   | "var"          { LETREF }
   | "val"          { VAL }
   | "=>"           { EQARROW }

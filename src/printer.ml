@@ -194,6 +194,7 @@ let printStmt s f =
   fpr oc "%s\n" (strStmt 0 s);
   flush oc;
   Log.log1 "Wrote to %s.\n" f;
+  fpr (open_out Settings.out_filename) "%s\n" f;
   ()
 
 let rec strStmtAst stmt = match stmt.stmt with

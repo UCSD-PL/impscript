@@ -6,6 +6,13 @@ let spr = Printf.sprintf
 
 let (|>) x f = f x
 
+let discardPreviousOutputFile () = 
+  let oc = open_out Settings.out_filename in
+  Printf.fprintf oc "";
+  close_out oc;
+  Unix.unlink Settings.out_filename;
+  ()
+
 
 (***** Command-line options ***************************************************)
 
@@ -168,6 +175,7 @@ let parseAndProcessFile f = function
       tcCheckCasts prog f
 
 let _ =
+  discardPreviousOutputFile ();
   Arg.parse argSpecs anonArgFun usage;
   match !srcFiles with
     | [ ] -> exit 0

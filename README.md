@@ -12,7 +12,7 @@ Licenses
 Execution Modes
 ---------------
 
-    Usage: ./impscript [options] (file.js | file.is | file.n.is)
+    Usage: ./impscript [options] (file.js | file.is | file.n.is | file._.is)
 
       Input       Mode
       ---------   -----------------------------------------------
@@ -23,6 +23,9 @@ Execution Modes
 
       file.n.is   1) Type check and insert casts in file.n+1.is
                   2) Type check file.n+1.is (sanity check)
+
+      file._.is   1) Type check and insert casts in file.99999.is
+                  2) Type check file.99999.is (sanity check)
 
       file.is     1) Type check file.is
 

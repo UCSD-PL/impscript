@@ -747,17 +747,15 @@ fun typeEnv heapEnv ets lists ->
 
   let foldFromEnv (locRoot, muRoot, pathLists) : exp list option =
     let rec tryPath path = function
+      | TRefLoc l when l = locRoot ->
+          Some (makeFolds path locRoot muRoot pathLists)
       | TRefLoc l ->
-          if l = locRoot then
-            Some (makeFolds path locRoot muRoot pathLists)
-          else begin
-            match HeapEnv.lookupLoc l heapEnv with
-              | Some HRecd TRecd (_, fts) ->
-                  List.fold_left (fun acc (f,t) ->
-                    ifNone acc (fun () -> tryPath (addPath path [f]) t)
-                  ) None fts
-              | _ -> None
-          end
+          (match HeapEnv.lookupLoc l heapEnv with
+            | Some HRecd TRecd (_, fts) ->
+                List.fold_left (fun acc (f,t) ->
+                  ifNone acc (fun () -> tryPath (addPath path [f]) t)
+                ) None fts
+            | _ -> None)
       | _ -> None
     in
     VarMap.fold (fun x y acc ->

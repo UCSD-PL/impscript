@@ -6,7 +6,7 @@ open LangUtils
    and binding forms are not paired with their scopes *)
 type parse_stmt = (* TODO attach line info *)
   | PSExp of exp
-  | PSVarDecl of var
+  | PSVarDecl of var * exp option
   | PSVarAssign of var * exp
   | PSObjAssign of exp * exp * exp
   | PSReturn of exp
@@ -16,22 +16,24 @@ type parse_stmt = (* TODO attach line info *)
   | PSClose of var list
   | PSExternVal of var * typ
   | PSTcInsert of parse_stmt
-  | PSTyAbbrev of ty_abbrev * (ty_var list * mu_type)
+  | PSMuAbbrev of ty_abbrev * (ty_var list * mu_type)
 
 and block = parse_stmt list
 
 let rec stmtOfBlock : block -> stmt = function
 
   (* pair binding forms with their scopes... *)
-  | PSVarDecl(x)::l -> sLetRef x (stmtOfBlock l)
+  | PSVarDecl(x,None)::l -> sLetRef x (stmtOfBlock l)
   | PSVarInvariant(x,t)::l -> sInvar x t (stmtOfBlock l)
   | PSExternVal(x,t)::l -> sExtern x t (stmtOfBlock l)
   | PSClose(xs)::l -> sClose xs (stmtOfBlock l)
-  | PSTyAbbrev(x,def)::l -> sTyDef x def (stmtOfBlock l)
+  | PSMuAbbrev(x,def)::l -> sMuDef x def (stmtOfBlock l)
 
   (* ... a couple simple cases ... *)
   | [] -> sSkip
   | PSTcInsert(s)::l -> sTcInsert (stmtOfBlock (s::l))
+  | PSVarDecl(x,Some(e))::l ->
+      stmtOfBlock (PSVarDecl (x, None) :: PSVarAssign (x, e) :: l)
 
   (* ... and use sequences for the rest *)
   | PSExp(e)::l -> sSeq [sExp e; stmtOfBlock l]
@@ -72,22 +74,27 @@ program : b=block EOF { stmtOfBlock b }
 block : l=list(parse_stmt) { l }
 
 parse_stmt :
- | e=exp SEMI           { PSExp e }
- | LETREF x=VAR SEMI    { PSVarDecl x }
- | x=VAR EQ e=exp SEMI  { PSVarAssign(x,e) }
- | RET e=exp SEMI       { PSReturn e }
+ | e=exp SEMI                   { PSExp e }
+ | LETREF x=VAR SEMI            { PSVarDecl (x, None) }
+ | LETREF x=VAR EQ e =exp SEMI  { PSVarDecl (x, Some e) }
+ | x=VAR EQ e=exp SEMI          { PSVarAssign(x,e) }
+ | RET e=exp SEMI               { PSReturn e }
+
  | e1=exp DOT f=VAR EQ e3=exp SEMI             { PSObjAssign (e1, eStr f, e3) }
  | e1=exp LBRACK e2=exp RBRACK EQ e3=exp SEMI  { PSObjAssign (e1, e2, e3) }
+
  | IF LPAREN e=exp RPAREN LBRACE s1=block RBRACE
-   ELSE LBRACE s2=block RBRACE  { PSIf (e,s1,s2) }
+   ELSE LBRACE s2=block RBRACE                     { PSIf (e,s1,s2) }
  | WHILE LPAREN e=exp RPAREN LBRACE s=block RBRACE { PSWhile(e,s) } 
+
  | EXTERN VAL x=VAR COLON t=typ SEMI { PSExternVal (x,t) }
  | INVARIANT x=VAR COLON t=typ SEMI { PSVarInvariant (x,t) }
  | CLOSE LBRACE xs=separated_list(COMMA,VAR) RBRACE SEMI { PSClose xs }
  | LBRACK ps=parse_stmt RBRACK { PSTcInsert ps }
- | TYPE x=VAR EQ mu=mu_type_def SEMI { PSTyAbbrev (x, ([], mu)) }
+
+ | TYPE x=VAR EQ mu=mu_type_def SEMI { PSMuAbbrev (x, ([], mu)) }
  | TYPE x=VAR LPAREN ys=separated_list(COMMA,TVAR) RPAREN
-   EQ mu=mu_type_def SEMI { PSTyAbbrev (x, (ys, mu)) }
+   EQ mu=mu_type_def SEMI { PSMuAbbrev (x, (ys, mu)) }
 
 base_val :
  | b=VBOOL { VBool b }

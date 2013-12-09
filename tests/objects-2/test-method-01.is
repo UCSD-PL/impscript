@@ -1,0 +1,24 @@
+extern val _isNull : (any) -> (bool);
+extern val _plus : (num, num) -> (num);
+
+type numlist = mu 'x. {hd: num, sum: (all L0. ?(*L0) / *L0: 'x) -> (num / *L0: 'x), tl: ?(ref('x))};
+
+var callSum = function (xs) {
+  [unfold (numlist, xs);]
+  return xs.sum([let __1 = xs in (let _ = fold (numlist, xs) in (__1))]);
+} as ((all L. *L / *L: numlist) -> (num / *L: numlist));
+
+var obj = {hd = 0, tl = null};
+obj.sum = function (this) {
+  [this = (all L_. ?(*L_) => *L_)(this);]
+  [unfold (numlist, this);]
+  if (_isNull(this.tl)) {
+    return [let __2 = this.hd in (let _ = fold (numlist, this) in (__2))];
+  } else {
+    return [let __3 = _plus(this.hd, this.sum(this.tl)) in (let _ = fold (numlist, this) in (__3))];
+  }
+} as ((all L0. ?(*L0) / *L0: numlist) -> (num / *L0: numlist));
+
+callSum([let __4 = obj in (let _ = fold (numlist, obj) in (__4))]);
+[unfold (numlist, obj);]
+obj.sum([let __5 = obj in (let _ = fold (numlist, obj) in (__5))]);

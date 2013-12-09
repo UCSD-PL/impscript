@@ -46,4 +46,5 @@ runTests(bcolors.YELLOW, "UNANNOTATED JAVASCRIPT (MAY FAIL)", ".*.js$")
 runTests(bcolors.RED, "NEGATIVE TESTS", "^xx[^.]*.is$")
 
 runTests(bcolors.GREEN, "POSITIVE TESTS", "[^x][^x][^.]*.is$")
+runTests(bcolors.GREEN, "POSITIVE TESTS", "[^x][^x][^.]*._.is$")
 

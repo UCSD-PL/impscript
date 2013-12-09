@@ -5,7 +5,8 @@ module StrSet = Set.Make (struct type t = string let compare = compare end)
 module IntSet = Set.Make (struct type t = int let compare = compare end)
 
 let removeDupes l =
-  List.fold_left (fun acc x -> if List.mem x acc then acc else x::acc) [] l
+  List.rev
+    (List.fold_left (fun acc x -> if List.mem x acc then acc else x::acc) [] l)
 
 let flattenSomeLists : ('a list option) list -> 'a list option =
 fun los ->

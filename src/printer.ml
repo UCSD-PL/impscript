@@ -145,9 +145,11 @@ and strStmt k stmt = match stmt.stmt with
   | SExp(e) -> spr "%s;" (strExp k e)
   | SReturn(e) -> spr "return %s;" (strExp k e)
   | SVarDecl(x,{stmt=SVarAssign(x',e)}) when x = x' ->
-      spr "var %s; %s = %s;" x x (strExp k e)
+      spr "var %s = %s;" x (strExp k e)
+      (* spr "var %s; %s = %s;" x x (strExp k e) *)
   | SVarDecl(x,{stmt=SSeq({stmt=SVarAssign(x',e)},s)}) when x = x' ->
-      spr "var %s; %s = %s;\n%s%s" x x (strExp k e) (tab k) (strStmt k s)
+      spr "var %s = %s;\n%s%s" x (strExp k e) (tab k) (strStmt k s)
+      (* spr "var %s; %s = %s;\n%s%s" x x (strExp k e) (tab k) (strStmt k s) *)
   | SVarDecl(x,s) -> spr "var %s;\n%s%s" x (tab k) (strStmt k s)
   | SVarAssign(x,e) -> spr "%s = %s;" x (strExp k e)
   (* | SSeq(s0,s) when s0 = LangUtils.sSkip -> spr "%s" (clip (strStmt k s)) *)
@@ -180,7 +182,7 @@ and strStmt k stmt = match stmt.stmt with
   | SExternVal(x,t,s) ->
       spr "extern val %s : %s;\n%s%s" x (strTyp t) (tab k) (strStmt k s)
       (* spr "extern val %s : %s\n%s%s" x (strTyp t) (tab k) (strStmt k s) *)
-  | STyAbbrev(x,(ys,mu),s) ->
+  | SMuAbbrev(x,(ys,mu),s) ->
       let tvars = if ys = [] then "" else spr "(%s)" (commas ys) in
         spr "type %s%s = %s;\n" x tvars (strMu mu)
       ^ spr "%s%s"              (tab k) (strStmt k s)

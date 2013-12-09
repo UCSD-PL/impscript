@@ -97,7 +97,7 @@ and stmt_ =
   | SClose of var list * stmt
   | SLoadedSrc of string * stmt
   | SExternVal of var * typ * stmt
-  | STyAbbrev of ty_abbrev * (ty_var list * mu_type) * stmt
+  | SMuAbbrev of ty_abbrev * (ty_var list * mu_type) * stmt
   | STcInsert of stmt
 
 and exp = { exp: exp_ }

@@ -66,16 +66,18 @@ type mode =
   | ImpScriptCheckCasts of string         (* file.is   *)
 
 let modeOf f =
-  (match stripSuffix f ".js" with
-     | Some(fPrefix) -> Some (JavaScript fPrefix)
-     | None ->
-         (match stripSuffix f ".is" with
-           | Some(fPrefix) ->
-               (match stripNumericSuffix fPrefix with
+  match stripSuffix f ".js" with
+   | Some fPrefix -> Some (JavaScript fPrefix)
+   | None ->
+      (match stripSuffix f "._.is" with
+        | Some fPrefix -> Some (ImpScriptInsertCasts (fPrefix, 99998))
+        | None ->
+           (match stripSuffix f ".is" with
+             | Some fPrefix ->
+                (match stripNumericSuffix fPrefix with
                   | Some(fPrefix,n) -> Some (ImpScriptInsertCasts (fPrefix, n))
                   | None -> Some (ImpScriptCheckCasts fPrefix))
-           | None -> None))
-
+             | None -> None))
 
 (***** Parsing ****************************************************************)
 

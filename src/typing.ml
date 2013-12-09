@@ -18,12 +18,14 @@ module TypeEnv = struct
 
   type t = { bindings: type_env_binding VarMap.t;
              loc_vars: Vars.t;
+             mu_vars: Vars.t;
              ty_abbrevs: (ty_var list * mu_type) StrMap.t;
              ret_world: output_world; }
 
   let empty : t =
     { bindings = VarMap.empty;
       loc_vars = Vars.empty;
+      mu_vars = Vars.empty;
       ty_abbrevs = StrMap.empty;
       ret_world = ([], TBot, []); }
 
@@ -57,11 +59,23 @@ module TypeEnv = struct
   fun ls typeEnv ->
     List.fold_left (fun acc l -> addLocVar l acc) typeEnv ls
 
-  let addTyAbbrev : ty_abbrev -> (ty_var list * mu_type) -> t -> t =
+  let memLocVar : var -> t -> bool =
+  fun x typeEnv ->
+    Vars.mem x typeEnv.loc_vars
+
+  let addMuVar : ty_var -> t -> t =
+  fun x typeEnv ->
+    { typeEnv with mu_vars = Vars.add x typeEnv.mu_vars }
+
+  let memMuVar : ty_var -> t -> bool =
+  fun x typeEnv ->
+    Vars.mem x typeEnv.mu_vars
+
+  let addMuAbbrev : ty_abbrev -> (ty_var list * mu_type) -> t -> t =
   fun x def typeEnv ->
     { typeEnv with ty_abbrevs = StrMap.add x def typeEnv.ty_abbrevs }
 
-  let lookupTyAbbrev : ty_abbrev -> t -> (ty_var list * mu_type) option =
+  let lookupMuAbbrev : ty_abbrev -> t -> (ty_var list * mu_type) option =
   fun x typeEnv ->
     if StrMap.mem x typeEnv.ty_abbrevs
     then Some (StrMap.find x typeEnv.ty_abbrevs)
@@ -158,10 +172,69 @@ let projTyp = function
   | Typ(t) -> t
   | _ -> failwith "projTyp"
 
-let wellFormed : TypeEnv.t -> pre_type -> bool =
-fun typeEnv pt ->
-  (* TODO *)
-  true
+let wfLoc : TypeEnv.t -> loc -> bool =
+fun typeEnv -> function
+  | LConst _ -> true
+  | LVar x   -> TypeEnv.memLocVar x typeEnv
+
+let rec wfPreType : TypeEnv.t -> pre_type -> bool =
+fun typeEnv -> function
+  | Typ t                -> wfTyp typeEnv t
+  | OpenArrow (r, arrow) -> wfRely typeEnv r && wfArrow typeEnv arrow
+  | Exists (l, pt)       -> wfPreType (TypeEnv.addLocVar l typeEnv) pt
+
+and wfTyp : TypeEnv.t -> typ -> bool =
+fun typeEnv -> function
+  | TBase _            -> true
+  | TAny | TBot        -> true
+  | TUnion ts          -> List.for_all (wfTyp typeEnv) ts
+  | TRefLoc l          -> wfLoc typeEnv l
+  | TMaybe t           -> wfTyp typeEnv t
+  | TExistsRef (_, mu) -> wfMuType typeEnv mu
+  | TArrow arrow       -> wfArrow typeEnv arrow
+
+and wfArrow : TypeEnv.t -> arrow -> bool =
+fun typeEnv ((allLocs,tArgs,h1), (someLocs,tRet,h2)) ->
+  let typeEnv1 = TypeEnv.addLocVars allLocs typeEnv in
+  let typeEnv2 = TypeEnv.addLocVars someLocs typeEnv1 in
+    List.for_all (wfTyp typeEnv1) tArgs
+      && wfHeap typeEnv1 h1
+      && wfTyp typeEnv2 tRet
+      && wfHeap typeEnv2 h2
+
+and wfMuType : TypeEnv.t -> mu_type -> bool =
+fun typeEnv -> function
+  | Mu (x, rt) -> wfRecdType (TypeEnv.addMuVar x typeEnv) rt
+  | MuVar x    -> TypeEnv.memMuVar x typeEnv
+  | MuAbbrev (x, ts) ->
+      (match TypeEnv.lookupMuAbbrev x typeEnv with
+        | Some _ -> List.for_all (wfTyp typeEnv) ts
+        | None   -> false)
+
+and wfRecdType : TypeEnv.t -> recd_type -> bool =
+fun typeEnv (TRecd (_, fts)) ->
+  let (fs,ts) = List.split fts in
+  fs = Utils.removeDupes fs && List.for_all (wfTyp typeEnv) ts
+
+and wfHeap : TypeEnv.t -> heap -> bool =
+fun typeEnv ->
+  List.for_all (function
+    | (l, HRecd rt) -> wfLoc typeEnv l && wfRecdType typeEnv rt
+    | (l, HMu mu)   -> wfLoc typeEnv l && wfMuType typeEnv mu
+  )
+
+and wfRely : TypeEnv.t -> rely -> bool =
+fun typeEnv ->
+  RelySet.for_all (fun (x,t) ->
+    match TypeEnv.lookupType x typeEnv with
+      | Some StrongRef -> wfTyp typeEnv t
+      | _              -> false
+  )
+
+let wfMuAbbrev : TypeEnv.t -> (ty_var list * mu_type) -> bool =
+fun typeEnv (xs, mu) ->
+  if List.length xs <> 0 then failwith "wfMuAbbrev type vars nyi";
+  wfMuType typeEnv mu
 
 let rec sub_ :
      (unit -> 'a)    (* success handler for everything but TExistsRef *)
@@ -299,31 +372,36 @@ function
          | Some(ls,t) -> Some (l::ls, t)
          | None       -> None)
 
-let joinHeapEnvs : HeapEnv.t -> HeapEnv.t -> HeapEnv.t =
-  let joinVars he1 he2 =
+let joinHeapEnvs : HeapEnv.t -> HeapEnv.t -> HeapEnv.t option =
+  let joinVars vars1 vars2 =
     VarMap.fold (fun x pt2 acc ->
-      if not (VarMap.mem x he2) then acc
-      else let pt3 = VarMap.find x he2 in
+      if not (VarMap.mem x vars2) then acc
+      else let pt3 = VarMap.find x vars2 in
            let (t2,t3) = (projTyp pt2, projTyp pt3) in
            VarMap.add x (Typ (join t2 t3)) acc
-    ) he1 VarMap.empty
+    ) vars1 VarMap.empty
   in
-  let joinLocs he1 he2 =
+  let joinLocs locs1 locs2 =
     LocMap.fold (fun l x acc ->
-      if not (LocMap.mem l he2) then acc
-      else
-        match x, LocMap.find l he2 with
-          | HRecd(rt1), HRecd(rt2) ->
-              LocMap.add l (HRecd (joinRecdTypes rt1 rt2)) acc
-          | x, y when x = y ->
-              LocMap.add l x acc
-          | _ ->
-              failwith "joinLocs"
-    ) he1 LocMap.empty
+      match acc, LocMap.mem l locs2 with
+        | Some locs, true ->
+            begin match x, LocMap.find l locs2 with
+              | HRecd rt1, HRecd rt2 ->
+                  Some (LocMap.add l (HRecd (joinRecdTypes rt1 rt2)) locs)
+              | x, y when x = y ->
+                  Some (LocMap.add l x locs)
+              | x, y ->
+                  None
+            end
+        | _ -> None
+    ) locs1 (Some LocMap.empty)
   in
   fun he1 he2 ->
-    { HeapEnv.vars = joinVars he1.HeapEnv.vars he2.HeapEnv.vars;
-      HeapEnv.locs = joinLocs he1.HeapEnv.locs he2.HeapEnv.locs; }
+    match joinLocs he1.HeapEnv.locs he2.HeapEnv.locs with
+      | None -> None
+      | Some locs ->
+          let vars = joinVars he1.HeapEnv.vars he2.HeapEnv.vars in
+          Some { HeapEnv.vars = vars; HeapEnv.locs = locs; }
 
 let isLambda exp = match exp.exp with
   | EFun _ | EAs({exp=EFun _},_) -> true
@@ -368,17 +446,15 @@ fun f (TRecd(width,rt)) ->
 
 let removeLocsFromType : typ -> typ =
 fun t ->
-  mapTyp (function TRefLoc _ -> TAny | s -> s) t
+  simpleMapTyp (function TRefLoc _ -> TAny | s -> s) t
 
 let unrollMuDef : mu_type -> (var * recd_type) -> recd_type =
 fun mu -> function
   | "_", rt -> rt
   | x, TRecd(width,fts) ->
-      let foo =
-        mapTyp (function
-                 | TExistsRef(l,MuVar(y)) when x = y -> TExistsRef (l, mu)
-                 | t -> t) in
-      let fts = List.map (fun (f, t) -> (f, foo t)) fts in
+      let fMu = function MuVar y when x = y -> mu | someMu -> someMu in
+      let mappers = { emptyMappers with fMu = fMu } in
+      let fts = List.map (fun (f, t) -> (f, mapTyp mappers t)) fts in
       TRecd (width, fts)
 
 let unrollMu : TypeEnv.t -> mu_type -> recd_type =
@@ -386,7 +462,7 @@ fun typeEnv mu ->
   match mu with
     | Mu(x,rt) -> unrollMuDef mu (x,rt)
     | MuAbbrev(t,[]) ->
-        (match TypeEnv.lookupTyAbbrev t typeEnv with
+        (match TypeEnv.lookupMuAbbrev t typeEnv with
           | Some([],Mu(x,rt)) -> unrollMuDef mu (x,rt)
           | None -> failwith "unrollMu 1"
           | _ -> failwith "unrollMu 2")
@@ -411,7 +487,7 @@ fun (TRecd(width,fts)) ->
         TRefLoc (LVar l)
     | t -> t
   in
-  let fts = List.map (fun (f,t) -> (f, mapTyp foo t)) fts in
+  let fts = List.map (fun (f,t) -> (f, simpleMapTyp foo t)) fts in
   (List.rev !existentialLocs, TRecd (width, fts))
 
 let singleRefOf : typ -> loc option =
@@ -504,9 +580,10 @@ fun typeEnv heapEnv locVars tsActual tsExpected hExpected ->
            Some (subst @ [(locVar_i,locArg_i)], heapEnv))
   ) (Some ([], heapEnv)) locVars
 
+(* TODO avoid capture *)
 let applySubst : loc_subst -> typ -> typ =
 fun subst ->
-  mapTyp (function
+  simpleMapTyp (function
     | TRefLoc LVar x when List.mem_assoc x subst -> TRefLoc (List.assoc x subst)
     | t -> t
   )
@@ -721,7 +798,9 @@ fun typeEnv heapEnv hGoal ets ->
     | YesIf rootedPathLists ->
         (match inferFolds typeEnv heapEnv ets rootedPathLists with
            | None -> No
-           | Some (canLiftAll, folds) -> YesIf (canLiftAll, folds))
+           | Some (canLiftAll, folds) ->
+               let canLiftAll = false in (* TODO *)
+               YesIf (canLiftAll, folds))
 
 type ('a, 'b) result =
   | Ok of 'a * 'b
@@ -741,9 +820,13 @@ let errS s stmt    = Err (sTcErr s stmt)
 
 (* TODO *)
 let compatible s t = match s, t with
+  | TAny, _ -> true
   | TRefLoc(l1), TRefLoc(l2) -> l1 = l2
   | _, TRefLoc _ | TRefLoc _, _ -> false
-  | _ -> true
+  | TArrow _, TBase _ -> false
+  | TBase x, TBase y when x <> y -> false
+  | _ -> false
+  (* | _ -> true *)
 
 let coerce (e, s, t) =
   let (s1,s2) = (strTyp s, strTyp t) in
@@ -1028,7 +1111,7 @@ and tcAnnotatedFun typeEnv heapEnv xs body rely tArgs tRet =
 and tcAnnotatedPolyFun typeEnv heapEnv xs body rely arrow =
   let ((allLocs,tArgs,h1),(someLocs,tRet,h2)) = arrow in
   let ptArrow = finishArrow rely arrow in
-  if not (wellFormed typeEnv ptArrow) then
+  if not (wfPreType typeEnv ptArrow) then
     Err (eTcErr "arrow not well-formed" (eAs (eFun xs body) ptArrow))
   else if List.length xs != List.length tArgs then
     failwith "add handling for len(actuals) != len(formals)"
@@ -1108,6 +1191,8 @@ and tcApp1 typeEnv heapEnv outFun eFun eArgs tArgs tRet =
         Ok (eApp eFun eArgs, (Typ tRet, heapEnv, out)))
 
 and tcAppPoly typeEnv heapEnv outFun eFun eArgs arrow =
+  let heapEnvOrig = heapEnv in
+  let eArgsOrig = eArgs in
   let ((allLocs,tArgsExpected,h1),(someLocs,tRet,h2)) = arrow in
   let (eArgs,maybeOutput) =
     List.fold_left (fun (eArgs,maybeOutput) eArg ->
@@ -1131,7 +1216,7 @@ and tcAppPoly typeEnv heapEnv outFun eFun eArgs arrow =
   in
   match maybeOutput with
    | None -> Err (eApp eFun eArgs)
-   | Some(tArgsActual,existentialLocs,heapEnv,out) ->
+   | Some(tArgsActual,existentialLocs,heapEnv,out) -> begin
        let substAndHeapEnv =
          computeLocSubst typeEnv heapEnv allLocs tArgsActual tArgsExpected h1 in
        match substAndHeapEnv with
@@ -1151,17 +1236,37 @@ and tcAppPoly typeEnv heapEnv outFun eFun eArgs arrow =
             let h1 = applySubstToHeap subst h1 in
             if not allOk then
               Err (eApp eFun eArgs)
-            else if not (heapSat heapEnv h1) then
-              let err = "input heap not satisfied" in
-              Err (eTcErr err (eApp eFun eArgs))
-            else
-              let substFresh = freshen someLocs in
-              let tRet = applySubst (subst @ substFresh) tRet in 
-              let h2 = applySubstToHeap (subst @ substFresh) h2 in
-              let heapEnv = removeHeap heapEnv h1 in
-              let heapEnv = addHeap heapEnv h2 in
-              let ptRet = addExists existentialLocs (Typ tRet) in
-              Ok (eApp eFun eArgs, (ptRet, heapEnv, out))
+            else begin
+              let ets = List.combine eArgs tArgsExpected in
+              match heapSatWithFolds typeEnv heapEnv h1 ets with
+                | No ->
+                    let err = "input heap not satisfied" in
+                    Err (eTcErr err (eApp eFun eArgs))
+                | Yes ->
+                    let substFresh = freshen someLocs in
+                    let tRet = applySubst (subst @ substFresh) tRet in 
+                    let h2 = applySubstToHeap (subst @ substFresh) h2 in
+                    let heapEnv = removeHeap heapEnv h1 in
+                    let heapEnv = addHeap heapEnv h2 in
+                    let ptRet = addExists existentialLocs (Typ tRet) in
+                    Ok (eApp eFun eArgs, (ptRet, heapEnv, out))
+                | YesIf (_, folds) ->
+                    let heapEnv = heapEnvOrig in
+                    let eArgs =
+                      match List.rev eArgsOrig with
+                       | [] -> failwith "app yesif"
+                       | eLast::eRest ->
+                           let eLast = inlineExpForFolds folds eLast in
+                           List.rev (eLast :: eRest)
+                    in
+                    (* inline backtracking *)
+                    (match tcAppPoly typeEnv heapEnv outFun eFun eArgs arrow with
+                      | Ok (s, stuff) -> Ok (s, stuff)
+                      | Err _ ->
+                          let err = "input heap not sat even with folds" in
+                          Err (eTcErr err (eApp eFun eArgsOrig)))
+            end
+     end
 
 and tcApp2 typeEnv heapEnv outFun eFun eArgs tFun =
   let tAnys = List.map (function _ -> TAny) eArgs in
@@ -1290,10 +1395,13 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
                            match heapSatWithFolds typeEnv heapEnv hGoal ets with
                              | No ->
                                  Err (sRet (eTcErr err e))
+                             (*
                              | YesIf (true, folds) ->
                                  let sRetry = retryStmtForFolds folds in
                                  Err (sRet (eTcErrRetry err e sRetry))
                              | YesIf (false, folds) ->
+                             *)
+                             | YesIf (_, folds) ->
                                  (* inline backtracking *)
                                  let e' = inlineExpForFolds folds eOrig in
                                  run tcStmt (typeEnv, heapEnvOrig, sRet e')
@@ -1387,9 +1495,15 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
                  let ptElse = snd (stripExists ptElse) in
                  let (tThen,tElse) = (projTyp ptThen, projTyp ptElse) in
                  let tJoin = join tThen tElse in
-                 let hJoin = joinHeapEnvs heapEnv2 heapEnv3 in
-                 let out = List.fold_left MoreOut.combine out1 [out2; out3] in
-                 Ok (sIf e1 s2 s3, (Typ tJoin, hJoin, out)))))
+                 match joinHeapEnvs heapEnv2 heapEnv3 with
+                  | None ->
+                      let err = spr "can't join heap env locs\n%s\n%s\n"
+                        (HeapEnv.strLocs heapEnv2) (HeapEnv.strLocs heapEnv3) in
+                      Err (sTcErr err (sIf e1 s2 s3))
+                  | Some heJoin ->
+                      let out =
+                        List.fold_left MoreOut.combine out1 [out2; out3] in
+                      Ok (sIf e1 s2 s3, (Typ tJoin, heJoin, out)))))
 
   | SWhile(e,s) ->
       run tcAndCoerceLocally (typeEnv, heapEnv, e, tBool)
@@ -1504,12 +1618,14 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
         (fun s -> Err (sTcInsert s))
         (fun s stuff -> Ok (sTcInsert s, stuff))
 
-  | STyAbbrev(x,def,s) ->
-      (* TODO check well-formedness of def *)
-      let typeEnv = TypeEnv.addTyAbbrev x def typeEnv in
-      run tcStmt (typeEnv, heapEnv, s)
-        (fun s -> Err (sTyDef x def s))
-        (fun s stuff -> Ok (sTyDef x def s, stuff))
+  | SMuAbbrev(x,def,s) ->
+      if not (wfMuAbbrev typeEnv def) then
+        Err (sTcErr "mu abbreviation not well-formed" (sMuDef x def s))
+      else
+        let typeEnv = TypeEnv.addMuAbbrev x def typeEnv in
+        run tcStmt (typeEnv, heapEnv, s)
+          (fun s -> Err (sMuDef x def s))
+          (fun s stuff -> Ok (sMuDef x def s, stuff))
 
 and runTcExp2 (typeEnv, heapEnv) (e1, e2) fError fOk =
   run tcExp (typeEnv, heapEnv, e1)

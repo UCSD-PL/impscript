@@ -30,7 +30,7 @@ let sIf e s1 s2    = wrapStmt (SIf (e, s1, s2))
 let sWhile e s     = wrapStmt (SWhile (e, s))
 let sLoaded f s    = wrapStmt (SLoadedSrc (f, s))
 let sExtern x t s  = wrapStmt (SExternVal (x, t, s))
-let sTyDef x y s   = wrapStmt (STyAbbrev (x, y, s))
+let sMuDef x y s   = wrapStmt (SMuAbbrev (x, y, s))
 let sExp e         = wrapStmt (SExp e)
 let sSet e1 e2 e3  = wrapStmt (SObjAssign (e1, e2, e3))
 let sTcInsert s    = wrapStmt (STcInsert s)
@@ -105,34 +105,56 @@ and mapStmt_ fE fS = function
   | SLoadedSrc(f,s) -> fS (SLoadedSrc (f, mapStmt fE fS s))
   | SExternVal(x,t,s) -> fS (SExternVal (x, t, mapStmt fE fS s))
   | STcInsert(s) -> fS (STcInsert (mapStmt fE fS s))
-  | STyAbbrev(x,def,s) -> fS (STyAbbrev (x, def, mapStmt fE fS s))
+  | SMuAbbrev(x,def,s) -> fS (SMuAbbrev (x, def, mapStmt fE fS s))
   | SObjAssign(e1,e2,e3) ->
       fS (SObjAssign (mapExp fE fS e1, mapExp fE fS e2, mapExp fE fS e3))
 
-let rec mapTyp fT = function
-  | TBase(bt) -> fT (TBase bt)
-  | TArrow((allLocs,ts,h1),(someLocs,t,h2)) ->
-      let (ts,t) = (List.map (mapTyp fT) ts, mapTyp fT t) in
-      let (h1,h2) = (mapHeap fT h1, mapHeap fT h2) in
-      fT (TArrow ((allLocs, ts, h1), (someLocs, t, h2)))
-  | TUnion(ts) -> fT (TUnion (List.map (mapTyp fT) ts))
-  | TAny -> fT TAny
-  | TBot -> fT TBot
-  | TMaybe(t) -> fT (TMaybe (mapTyp fT t))
-  | TRefLoc(l) -> fT (TRefLoc l)
-  | TExistsRef(l,mu) -> fT (TExistsRef (l, mu)) (* not recursing into mu type *)
+type mappers = {
+  fT  : typ -> typ;
+  fMu : mu_type -> mu_type;
+}
 
-and mapHeap fT =
+let emptyMappers = {
+  fT  = (fun x -> x);
+  fMu = (fun x -> x);
+}
+
+let rec mapTyp foo typ =
+  let fT = foo.fT in
+  match typ with
+   | TBase bt -> fT (TBase bt)
+   | TArrow ((allLocs,ts,h1), (someLocs,t,h2)) ->
+       let (ts,t) = (List.map (mapTyp foo) ts, mapTyp foo t) in
+       let (h1,h2) = (mapHeap foo h1, mapHeap foo h2) in
+       fT (TArrow ((allLocs, ts, h1), (someLocs, t, h2)))
+   | TUnion ts -> fT (TUnion (List.map (mapTyp foo) ts))
+   | TAny -> fT TAny
+   | TBot -> fT TBot
+   | TMaybe t -> fT (TMaybe (mapTyp foo t))
+   | TRefLoc l -> fT (TRefLoc l)
+   | TExistsRef (l, mu) -> fT (TExistsRef (l, mapMuType foo mu))
+
+and mapHeap foo =
   List.map (function
-    | (l,HRecd(rt)) -> failwith "mapHeap"
-    | (l,HMu(mu)) -> failwith "mapHeap"
+    | (l, HRecd rt) -> (l, HRecd (mapRecdType foo rt))
+    | (l, HMu mu)   -> (l, HMu (mapMuType foo mu))
   )
 
-let rec foldExp fE fS acc {exp=e} =
-  foldExp_ fE fS acc e
+and mapRecdType foo (TRecd (width, fts)) =
+  TRecd (width, List.map (fun (x, t) -> (x, mapTyp foo t)) fts)
 
-and foldStmt fE fS acc {stmt=s} =
-  foldStmt_ fE fS acc s
+and mapMuType foo mu =
+  let fMu = foo.fMu in
+  match mu with
+    | Mu (x, rt)       -> fMu (Mu (x, mapRecdType foo rt))
+    | MuVar x          -> fMu (MuVar x)
+    | MuAbbrev (x, ts) -> fMu (MuAbbrev (x, List.map (mapTyp foo) ts))
+
+let simpleMapTyp fT = mapTyp { emptyMappers with fT = fT }
+
+let rec foldExp fE fS acc {exp=e} = foldExp_ fE fS acc e
+
+and foldStmt fE fS acc {stmt=s} = foldStmt_ fE fS acc s
 
 and foldExp_ fE fS acc = function
   | EBase(v) ->
@@ -211,9 +233,9 @@ and foldStmt_ fE fS acc = function
   | STcInsert(s) ->
       let acc = foldStmt fE fS acc s in
       fS acc (STcInsert s)
-  | STyAbbrev(x,def,s) ->
+  | SMuAbbrev(x,def,s) ->
       let acc = foldStmt fE fS acc s in
-      fS acc (STyAbbrev (x, def, s))
+      fS acc (SMuAbbrev (x, def, s))
   | SObjAssign(e1,e2,e3) ->
       let acc = List.fold_left (foldExp fE fS) acc [e1;e2;e3] in
       fS acc (SObjAssign (e1, e2, e3))

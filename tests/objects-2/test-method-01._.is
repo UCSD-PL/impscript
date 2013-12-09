@@ -18,7 +18,7 @@ obj.sum = function (all L0. this:?(*L0) / *L0: numlist)
   if (_isNull(this.tl)) {
     return this.hd;
   } else {
-    return _plus(this.hd, this.sum(this.tl));
+    return _plus(this.hd, this.tl.sum(this.tl));
   }
 };
 

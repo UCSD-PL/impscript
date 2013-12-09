@@ -15,7 +15,13 @@ obj.sum = function (this) {
   if (_isNull(this.tl)) {
     return [let __2 = this.hd in (let _ = fold (numlist, this) in (__2))];
   } else {
-    return [let __3 = _plus(this.hd, this.sum(this.tl)) in (let _ = fold (numlist, this) in (__3))];
+    [this.tl = (all L_. ?(*L_) => *L_)(this.tl);]
+    [unfold (numlist, this.tl);]
+    return [let __4 = _plus(this.hd, this.tl.sum([let __5 = this.tl in
+                                                 (let _ = fold (numlist, this.tl) in
+                                                 (__5))])) in
+           (let _ = fold (numlist, this) in
+           (__4))];
   }
 } as ((all L0. ?(*L0) / *L0: numlist) -> (num / *L0: numlist));
 

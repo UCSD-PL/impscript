@@ -21,8 +21,10 @@ obj.sum = function (this) {
     return [let __1 = i in (let _ = fold (numlist, this) in (__1))];
   } else {
     var i = this.hd;
-    var f = this.sum;
     this.tl = (all Lblah. ?(*Lblah) => *Lblah)(this.tl);
+    [unfold (numlist, this.tl);]
+    var f = this.tl.sum;
+    fold (numlist, this.tl);
     return [let __2 = _plus(i, f(this.tl)) in (let _ = fold (numlist, this) in (__2))];
   }
 } as ((all L0. *L0 / *L0: numlist) -> (num / *L0: numlist));

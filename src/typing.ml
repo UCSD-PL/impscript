@@ -746,17 +746,30 @@ fun typeEnv heapEnv ets lists ->
     ) None ets in
 
   let foldFromEnv (locRoot, muRoot, pathLists) : exp list option =
-    VarMap.fold (fun x t acc ->
-      ifNone acc (fun () ->
-        match t with
-          | Val TRefLoc l | InvariantRef TRefLoc l when l = locRoot ->
-              Some (makeFolds (LvalVar x) locRoot muRoot pathLists)
+    let rec tryPath path = function
+      | TRefLoc l ->
+          if l = locRoot then
+            Some (makeFolds path locRoot muRoot pathLists)
+          else begin
+            match HeapEnv.lookupLoc l heapEnv with
+              | Some HRecd TRecd (_, fts) ->
+                  List.fold_left (fun acc (f,t) ->
+                    ifNone acc (fun () -> tryPath (addPath path [f]) t)
+                  ) None fts
+              | _ -> None
+          end
+      | _ -> None
+    in
+    VarMap.fold (fun x y acc ->
+      ifNone acc begin fun () ->
+        match y with
+          | Val t | InvariantRef t -> tryPath (LvalVar x) t
           | StrongRef ->
               (match HeapEnv.lookupVar x heapEnv with
-                 | Some Typ TRefLoc l when l = locRoot ->
-                     Some (makeFolds (LvalVar x) locRoot muRoot pathLists)
+                 | Some Typ t -> tryPath (LvalVar x) t
                  | _ -> None)
-          | _ -> None)
+          | _ -> None
+      end
     ) typeEnv.TypeEnv.bindings None in
 
   List.fold_left (fun acc rootedPathList ->
@@ -1157,6 +1170,7 @@ and tcAnnotatedPolyFun typeEnv heapEnv xs body rely arrow =
                     if not (sub tBody tRet) then
                       let err = "bad fall-thru type" in
                       Err (eAs (eFun xs (sTcErr err body)) ptArrow)
+                    (* TODO heapSatWithFolds here *)
                     else if not (heapSat heapEnvFunOut h2) then
                       let err = spr "bad fall-thru heap environment:\n\n%s\n\n%s\n\n"
                         (HeapEnv.strLocs heapEnvFunOut) (strHeap h2) in

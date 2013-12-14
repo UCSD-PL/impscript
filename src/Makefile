@@ -14,7 +14,7 @@ loc:
 	wc -l lang.ml main.ml langUtils.ml                \
 	  utils.ml settings.ml log.ml                     \
 	  langLexer.mll langParser.mly                    \
-	  desugar.ml printer.ml                           \
+	  desugar.ml printer.ml acePrinter.ml             \
 	  typing.ml                                       \
 	  ../prims/prims.is                               \
 

@@ -139,7 +139,10 @@ let rec addPrelude prelude prog =
 let tcCheckCasts prog f =
   Settings.castInsertionMode := false;
   match Typing.typecheck prog with
-   | Typing.Ok _ -> Log.log1 "\n%s\n" (Utils.greenString "TC: OK")
+   | Typing.Ok (prog, _) -> begin
+       AcePrinter.print prog (spr "%s.html" f);
+       Log.log1 "\n%s\n" (Utils.greenString "TC: OK");
+      end
    | Typing.Err(prog) -> begin
        Log.log1 "\n%s " (Utils.redString "TC: FAILED!");
        Printer.printStmt prog (spr "%s.error" f);

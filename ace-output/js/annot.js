@@ -93,7 +93,8 @@ var editor = ace.edit("editor");
 editor.setTheme("ace/theme/chaos");
 editor.setReadOnly(true);
 
-var SrcMode = require("ace/mode/haskell").Mode;
+//var SrcMode = require("ace/mode/haskell").Mode;
+var SrcMode = require("ace/mode/javascript").Mode;
 editor.getSession().setMode(new SrcMode());
 var typeTooltip = new TokenTooltip(editor, annotFun);
 

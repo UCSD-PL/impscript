@@ -207,6 +207,9 @@ let rec strStmtAst stmt = match stmt.stmt with
   | SSeq(s1,s2) -> spr "SSeq(%s,%s)" (strStmtAst s1) (strStmtAst s2)
   | SExternVal(x,_,s) -> spr "SExternVal(%s,...,%s)" x (strStmtAst s)
   | SLoadedSrc(_,s) -> spr "SLoadedSrc(...,%s)" (strStmtAst s)
+  | SIf _ -> spr "SIf(...)"
+  | SWhile _ -> spr "SWhile(...)"
+  | SVarInvariant _ -> "SVarInvariant(...)"
   | _ -> "strStmtAst"
 
 let rec strExpAst exp = match exp.exp with

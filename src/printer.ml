@@ -26,6 +26,7 @@ let rec strTyp = function
   (* | TExistsRef("L",MuVar(x)) -> x *)
   (* | TExistsRef(l,mu) -> spr "exists *%s: %s. ref %s" l (strMu mu) l *)
   | TMaybe(t) -> spr "?(%s)" (strTyp t)
+  | TPlaceholder -> "XXX"
 
 and strArrow ((allLocs,tArgs,h1),(someLocs,tRet,h2)) flag =
   let input = spr "%s%s%s"

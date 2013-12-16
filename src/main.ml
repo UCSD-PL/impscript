@@ -144,6 +144,7 @@ let tcCheckCasts prog f =
        Log.log1 "\n%s\n" (Utils.greenString "TC: OK");
       end
    | Typing.Err(prog) -> begin
+       AcePrinter.print prog (spr "%s.error.html" f);
        Log.log1 "\n%s " (Utils.redString "TC: FAILED!");
        Printer.printStmt prog (spr "%s.error" f);
      end

@@ -9,6 +9,10 @@ type ty_var = string
 
 type field = string
 
+
+(******************************************************************************)
+(*** Types ********************************************************************)
+
 type width = ExactDomain | UnknownDomain
 
 type loc =
@@ -32,6 +36,7 @@ type typ =
   | TRefLoc of loc
   | TMaybe of typ
   | TExistsRef of loc_var * mu_type (* exists *L: 'x. Ref L *)
+  | TPlaceholder
 
 and arrow = input_world * output_world
 
@@ -61,6 +66,41 @@ type pre_type =
   | Typ of typ
   | OpenArrow of rely * arrow
   | Exists of var * pre_type
+
+
+(******************************************************************************)
+(*** Type Checking Environments ***********************************************)
+
+module VarMap = Map.Make (struct type t = var let compare = compare end)
+module LocMap = Map.Make (struct type t = loc let compare = compare end)
+module Vars   = Set.Make (struct type t = var let compare = compare end)
+module Types  = Set.Make (struct type t = typ let compare = compare end)
+module StrMap = Utils.StrMap
+
+type type_env_binding =
+  | Val of typ
+  | StrongRef
+  | InvariantRef of typ
+
+type type_env = {
+  bindings: type_env_binding VarMap.t;
+  loc_vars: Vars.t;
+  mu_vars: Vars.t;
+  ty_abbrevs: (ty_var list * mu_type) StrMap.t;
+  ret_world: output_world;
+}
+
+type heap_env = {
+  vars: pre_type VarMap.t;
+  locs: loc_binding LocMap.t;
+}
+
+let emptyHeapEnv =
+  { vars = VarMap.empty; locs = LocMap.empty }
+
+
+(******************************************************************************)
+(*** Expressions and Statements ***********************************************)
 
 type base_val =
   | VNum of float
@@ -100,8 +140,12 @@ and stmt_ =
   | SMuAbbrev of ty_abbrev * (ty_var list * mu_type) * stmt
   | STcInsert of stmt
 
-and exp = { exp: exp_ }
-and stmt = { stmt: stmt_ }
+and exp = { exp: exp_; pt_e: pre_type; }
+
+and stmt = { stmt: stmt_; pt_s: pre_type; he_s: heap_env; }
+
+
+(******************************************************************************)
 
 exception Parse_error of string
 
@@ -109,8 +153,5 @@ let pr  = Printf.printf
 let spr = Printf.sprintf
 let fpr = Printf.fprintf
 
-module VarMap = Map.Make (struct type t = var let compare = compare end)
-module LocMap = Map.Make (struct type t = loc let compare = compare end)
-module Vars   = Set.Make (struct type t = var let compare = compare end)
-module Types  = Set.Make (struct type t = typ let compare = compare end)
+let (|>) x f = f x
 

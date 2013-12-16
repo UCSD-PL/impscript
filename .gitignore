@@ -4,5 +4,6 @@ impscript
 tests/*/*.[0-9]*.is
 tests/*/*.is.error
 tests/*/*.is.html
+tests/*/*.is.error.html
 /*/*.swp
 /*/*/*.swp

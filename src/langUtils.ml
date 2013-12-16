@@ -1,7 +1,7 @@
 
 open Lang
 
-let wrapExp e      = { exp = e }
+let wrapExp e      = { exp = e; pt_e = Typ TPlaceholder }
 let eFun xs s      = wrapExp (EFun (xs, s))
 let eStr s         = wrapExp (EBase (VStr s))
 let eBool b        = wrapExp (EBase (VBool b))
@@ -20,7 +20,7 @@ let eUnfold mu e   = wrapExp (EUnfold (mu, e))
 let eTcInsert e    = wrapExp (ETcInsert e)
 let eLet x e1 e2   = wrapExp (ELet (x, e1, e2))
 
-let wrapStmt s     = { stmt = s }
+let wrapStmt s     = { stmt = s; pt_s = Typ TPlaceholder; he_s = emptyHeapEnv }
 let sRet e         = wrapStmt (SReturn e)
 let sLetRef x s    = wrapStmt (SVarDecl (x, s))
 let sAssign x e    = wrapStmt (SVarAssign (x, e))
@@ -73,9 +73,11 @@ let isStr = function
 
 (* might want to include an fT parameter for these mappers *)
 
-let rec mapExp fE fS {exp=e} = {exp = mapExp_ fE fS e}
+let rec mapExp fE fS exp =
+  {exp with exp = mapExp_ fE fS exp.exp}
 
-and mapStmt fE fS {stmt=s} = {stmt = mapStmt_ fE fS s}
+and mapStmt fE fS stmt =
+  {stmt with stmt = mapStmt_ fE fS stmt.stmt}
 
 and mapExp_ fE fS = function
   | EBase(v) -> fE (EBase v)
@@ -133,6 +135,7 @@ let rec mapTyp foo typ =
    | TMaybe t -> fT (TMaybe (mapTyp foo t))
    | TRefLoc l -> fT (TRefLoc l)
    | TExistsRef (l, mu) -> fT (TExistsRef (l, mapMuType foo mu))
+   | TPlaceholder -> fT TPlaceholder
 
 and mapHeap foo =
   List.map (function

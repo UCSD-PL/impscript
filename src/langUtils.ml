@@ -1,7 +1,12 @@
 
 open Lang
 
-let wrapExp e      = { exp = e; pt_e = Typ TPlaceholder }
+let wrapExp e = {
+  exp = e;
+  pt_e = Typ TPlaceholder;
+  extra_info_e = ""
+}
+
 let eFun xs s      = wrapExp (EFun (xs, s))
 let eStr s         = wrapExp (EBase (VStr s))
 let eBool b        = wrapExp (EBase (VBool b))
@@ -20,7 +25,13 @@ let eUnfold mu e   = wrapExp (EUnfold (mu, e))
 let eTcInsert e    = wrapExp (ETcInsert e)
 let eLet x e1 e2   = wrapExp (ELet (x, e1, e2))
 
-let wrapStmt s     = { stmt = s; pt_s = Typ TPlaceholder; he_s = emptyHeapEnv }
+let wrapStmt s = {
+  stmt = s;
+  pt_s = Typ TPlaceholder;
+  he_s = emptyHeapEnv;
+  extra_info_s = ""
+}
+
 let sRet e         = wrapStmt (SReturn e)
 let sLetRef x s    = wrapStmt (SVarDecl (x, s))
 let sAssign x e    = wrapStmt (SVarAssign (x, e))

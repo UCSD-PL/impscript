@@ -830,6 +830,9 @@ let uncurry3 f (x,y,z)     = f x y z
 let okE_ e                 = uncurry3 (okE e)
 let okS_ s                 = uncurry3 (okS s)
 
+let expWithExtraInfo e str  = { e with extra_info_e = str }
+let stmtWithExtraInfo s str = { s with extra_info_s = str }
+
 (* TODO *)
 let compatible s t = match s, t with
   | TAny, _ -> true
@@ -1269,7 +1272,16 @@ and tcAppPoly typeEnv heapEnv outFun eFun eArgs arrow =
                     let heapEnv = removeHeap heapEnv h1 in
                     let heapEnv = addHeap heapEnv h2 in
                     let ptRet = addExists existentialLocs (Typ tRet) in
-                    okE (eApp eFun eArgs) ptRet heapEnv out
+                    let ann =
+                      if List.length subst = 0 then ""
+                      else
+                        spr "inferred location instantiations:\n\n%s" 
+                        (String.concat ", "
+                           (List.map (fun (lvar,loc) ->
+                              spr "%s := %s" lvar (strLoc loc)
+                           ) subst)) in
+                    let eApp = expWithExtraInfo (eApp eFun eArgs) ann in
+                    okE eApp ptRet heapEnv out
                 | YesIf (_, folds) ->
                     let heapEnv = heapEnvOrig in
                     let eArgs =
@@ -1562,7 +1574,12 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
               let heapEnv = HeapEnv.removeVar x heapEnv in
               run tcStmt (typeEnv, heapEnv, s)
                 (fun s -> Err (sInvar x tGoalX s))
-                (fun s stuff -> okS_ (sInvar x tGoalX s) stuff))
+                (fun s stuff ->
+                   let ann =
+                     spr "before   %s: ref / *%s: %s\nafter    %s: ref(%s)"
+                       x x (strTyp tCurrentX) x (strTyp tGoalX) in
+                   let sInvar = stmtWithExtraInfo (sInvar x tGoalX s) ann in
+                   okS_ sInvar stuff))
 
   | SClose(xs,s) ->
       if xs = [] then Err (sTcErr "need at least one var" (sClose xs s)) else
@@ -1591,7 +1608,10 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
         in
         run tcStmt (typeEnv, heapEnv, s)
           (fun s -> Err (sClose xs s))
-          (fun s stuff -> okS_ (sClose xs s) stuff)
+          (fun s stuff ->
+             let ann = AcePrinter.strHeapEnv heapEnv in
+             let sClose = stmtWithExtraInfo (sClose xs s) ann in
+             okS_ sClose stuff)
 
   | SObjAssign(e1,e2,e3) ->
       runTcExp3 (typeEnv, heapEnv) (e1, e2, e3)

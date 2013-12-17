@@ -140,9 +140,18 @@ and stmt_ =
   | SMuAbbrev of ty_abbrev * (ty_var list * mu_type) * stmt
   | STcInsert of stmt
 
-and exp = { exp: exp_; pt_e: pre_type; }
+and exp = {
+  exp: exp_;
+  pt_e: pre_type;
+  extra_info_e: string
+}
 
-and stmt = { stmt: stmt_; pt_s: pre_type; he_s: heap_env; }
+and stmt = {
+  stmt: stmt_;
+  pt_s: pre_type;
+  he_s: heap_env;
+  extra_info_s: string
+}
 
 
 (******************************************************************************)

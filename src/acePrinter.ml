@@ -155,29 +155,31 @@ fun k stmt -> match stmt.stmt with
         hideInComment (walkStmt k s1); Newline;
         Tab k; walkStmt k s2
       ]
-  | STcInsert ({stmt = SVarInvariant (x, t, s)}) ->
+  | STcInsert ({stmt = SVarInvariant (x, t, s)} as s0) ->
       inner [
         hideInComment
-          (inner [leaf (spr "invariant %s : %s" x (P.strTyp t)); semi "TODO"]);
+          (inner [leaf (spr "invariant %s : %s" x (P.strTyp t));
+                  semi s0.extra_info_s]);
         Newline; Tab k; walkStmt k s
       ]
-  | STcInsert ({stmt = SClose (xs, s)}) ->
+  | STcInsert ({stmt = SClose (xs, s)} as s0) ->
       inner [
         hideInComment
-          (inner [leaf (spr "close {%s}" (P.commas xs)); semi "TODO"]);
+          (inner [leaf (spr "close {%s}" (P.commas xs));
+                  semi s0.extra_info_s]);
         Newline; Tab k; walkStmt k s
       ]
   | STcInsert s ->
       hideInComment (walkStmt k s)
   | SVarInvariant (x, t, s) ->
       inner [
-        leaf (spr "invariant %s : %s" x (P.strTyp t)); semi "TODO"; Newline;
-        Tab k; walkStmt k s
+        leaf (spr "invariant %s : %s" x (P.strTyp t)); semi stmt.extra_info_s;
+        Newline; Tab k; walkStmt k s
       ]
   | SClose (xs, s) ->
       inner [
-        leaf (spr "close {%s}" (P.commas xs)); semi "TODO"; Newline;
-        Tab k; walkStmt k s
+        leaf (spr "close {%s}" (P.commas xs)); semi stmt.extra_info_s;
+        Newline; Tab k; walkStmt k s
       ]
 
 and walkExp : int -> exp -> printing_tree =
@@ -196,7 +198,7 @@ fun k exp -> match exp.exp with
       let treeFun = walkExp k e in
       let treeArgs = treeCommas (List.map (walkExp k) es) in
       inner [
-        treeFun; leaf " "; leaf ~ann:"TODO" "(";
+        treeFun; leaf " "; leaf ~ann:exp.extra_info_e "(";
         treeArgs; leaf ~ann:(P.strPreTyp exp.pt_e) ")"
       ]
   (* TODO annotated functions *)

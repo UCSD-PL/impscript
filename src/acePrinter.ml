@@ -38,12 +38,16 @@ type printing_tree =
   | Tab of int
   | Newline
   | HighlightError of printing_tree
-  | HideInComment of printing_tree
+  | HideInComment of bool * printing_tree
+      (* flag signifies whether to try to use single-line JS comment *)
 
 let leaf  ?(ann="") s = Leaf  (s, ann)
 let inner ?(ann="") l = Inner (l, ann)
 
 let semi ann = inner [leaf " "; leaf ~ann ";"] (* space before ";" *)
+
+let hideInComment tr       = HideInComment (true, tr)
+let hideInCommentSingle tr = HideInComment (false, tr)
 
 let sepTrees : string -> printing_tree list -> printing_tree =
 fun sep trees ->
@@ -148,23 +152,23 @@ fun k stmt -> match stmt.stmt with
       ]
   | STcInsert ({stmt = SSeq (s1, s2)}) ->
       inner [
-        HideInComment (walkStmt k s1); Newline;
+        hideInComment (walkStmt k s1); Newline;
         Tab k; walkStmt k s2
       ]
   | STcInsert ({stmt = SVarInvariant (x, t, s)}) ->
       inner [
-        HideInComment
+        hideInComment
           (inner [leaf (spr "invariant %s : %s" x (P.strTyp t)); semi "TODO"]);
         Newline; Tab k; walkStmt k s
       ]
   | STcInsert ({stmt = SClose (xs, s)}) ->
       inner [
-        HideInComment
+        hideInComment
           (inner [leaf (spr "close {%s}" (P.commas xs)); semi "TODO"]);
         Newline; Tab k; walkStmt k s
       ]
   | STcInsert s ->
-      HideInComment (walkStmt k s)
+      hideInComment (walkStmt k s)
   | SVarInvariant (x, t, s) ->
       inner [
         leaf (spr "invariant %s : %s" x (P.strTyp t)); semi "TODO"; Newline;
@@ -228,7 +232,7 @@ fun k exp -> match exp.exp with
   | EUnfold (mu, e) ->
       inner [leaf (spr "unfold (%s, " (P.strMu mu)); walkExp k e; leaf ")"]
   | ETcInsert e ->
-      HideInComment (walkExp k e)
+      hideInCommentSingle (walkExp k e)
   | ELet (x, e1, e2) ->
       inner [
         leaf (spr "let %s = " x); walkExp k e1; leaf " in ";
@@ -263,7 +267,7 @@ fun row col -> function
       let highlightRange = ((row-1, col-1), (row'-1, col'-1)) in
       (s, row', col', tips, highlightRange :: ranges)
 
-  | HideInComment tr ->
+  | HideInComment (trySingleLine, tr) ->
       let (pre,suf) = ("/*: ", " */") in
       let preSingle = ("//: ") in
       let len = String.length in
@@ -271,7 +275,7 @@ fun row col -> function
       let (s,row',col',tips,ranges) = walkTree row (col + len pre) tr in
 
       (* choose either multi- or single-line comment *)
-      if Str.string_match (Str.regexp ".*\n") s 0
+      if Str.string_match (Str.regexp ".*\n") s 0 || trySingleLine = false
       then (spr "%s%s%s" pre s suf, row', col' + len suf, tips, ranges)
       else (spr "%s%s" preSingle s, row', col'          , tips, ranges)
 

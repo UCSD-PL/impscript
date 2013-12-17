@@ -989,7 +989,10 @@ let rec tcExp (typeEnv, heapEnv, exp) = match exp.exp with
                   | Some(HRecd(rt)) ->
                       (match pack typeEnv heapEnv l rt mu with
                         | Some(heapEnv) ->
-                            okE (eFold mu e) (addExists locs pt) heapEnv out
+                            (* TODO show before/after heaps side-by-side *)
+                            let ann = AcePrinter.strHeapEnv heapEnv in
+                            let eFold = expWithExtraInfo (eFold mu e) ann in
+                            okE eFold (addExists locs pt) heapEnv out
                         | None ->
                             let err = spr "can't pack:\n\n %s\n\n %s\n\n"
                               (strRecdType rt)
@@ -1019,7 +1022,10 @@ let rec tcExp (typeEnv, heapEnv, exp) = match exp.exp with
                           (fun acc li -> HeapEnv.addLoc (LVar li) (HMu mu) acc)
                           heapEnv existentialLocs
                       in
-                      okE (eUnfold mu e) pt heapEnv out)
+                      (* TODO show before/after heaps side-by-side *)
+                      let ann = AcePrinter.strHeapEnv heapEnv in
+                      let eUnfold = expWithExtraInfo (eUnfold mu e) ann in
+                      okE eUnfold pt heapEnv out)
             | _ ->
                 let err = spr "not a reference type:\n%s\n" (strPreTyp pt) in
                 Err (eUnfold mu (eTcErr err e)))

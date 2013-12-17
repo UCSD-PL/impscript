@@ -108,24 +108,24 @@ fun k stmt -> match stmt.stmt with
   | SVarDecl (x, ({stmt = SVarAssign (x', e)} as s0)) when x = x' ->
       inner [leaf (spr "var %s = " x); walkExp k e; semi (strWorldEnv s0)]
 
-  | SVarDecl (x, {stmt = SSeq (({stmt =
-      SVarAssign (x', {exp = EAs (({exp = EFun _} as eFun), pt)})} as s0), s)})
-        when x = x' ->
-      (* strip annotation, and use sSeq to put sequence back together.
-         sSeq inserts dummy info, okay b/c printing SSeq doesn't use it. *)
-      let s0 = {s0 with stmt = SVarAssign (x, eFun)} in
-      let stmt = {stmt with stmt = SVarDecl (x, LangUtils.sSeq [s0; s])} in
-      inner [
-        hideInComment (leaf (spr "%s :: %s" x (P.strPreTyp pt))); Newline;
-        walkStmt k stmt
-      ]
-
-  | SVarDecl (x, {stmt = SSeq (({stmt = SVarAssign (x', e)} as s0), s)})
-        when x = x' ->
-      inner [
-        leaf (spr "var %s = " x); walkExp k e; semi (strWorldEnv s0); Newline;
-        Tab k; walkStmt k s
-      ]
+  | SVarDecl (x, {stmt = SSeq (({stmt = SVarAssign (x', e)} as s1), s2)})
+        when x = x' -> begin
+      match e.exp with
+       | EAs (({exp = EFun _} as eFun), pt) ->
+           (* strip annotation, and use sSeq to put sequence back together.
+              sSeq inserts dummy info, okay b/c printing SSeq doesn't use it. *)
+           let s1 = {s1 with stmt = SVarAssign (x, eFun)} in
+           let stmt = {stmt with stmt = SVarDecl (x, LangUtils.sSeq [s1;s2])} in
+           inner [
+             hideInComment (leaf (spr "%s :: %s" x (P.strPreTyp pt)));
+             Newline; walkStmt k stmt
+           ]
+       | _ ->
+           inner [
+             leaf (spr "var %s = " x); walkExp k e; semi (strWorldEnv s1);
+             Newline; Tab k; walkStmt k s2
+           ]
+    end
 
   | SVarDecl (x, s) ->
       inner [leaf (spr "var %s" x); semi ""; Newline; Tab k; walkStmt k s]
@@ -281,10 +281,12 @@ fun k exp -> match exp.exp with
       ])
 
   | EFold (mu, e) ->
-      inner [leaf (spr "fold (%s, " (P.strMu mu)); walkExp k e; leaf ")"]
+      let ann = exp.extra_info_e in
+      inner [leaf (spr "fold (%s, " (P.strMu mu)); walkExp k e; leaf ~ann ")"]
 
   | EUnfold (mu, e) ->
-      inner [leaf (spr "unfold (%s, " (P.strMu mu)); walkExp k e; leaf ")"]
+      let ann = exp.extra_info_e in
+      inner [leaf (spr "unfold (%s, " (P.strMu mu)); walkExp k e; leaf ~ann ")"]
 
   | ETcInsert {exp = ELet (x, e1, e2)} ->
       inner [
@@ -302,14 +304,13 @@ fun k exp -> match exp.exp with
      - bare ELet should appear only inside a sequence of tc-inserted inline
        folds, so don't add any nested comments *)
   | ELet (x, e1, e2) ->
-      if x <> "_" then failwith "AcePrinter.walkExp ELet" else
-      inner [walkExp k e1; leaf "; "; walkExp k e2]
-(*
-      inner [
-        leaf (spr "let %s = " x); walkExp k e1; leaf " in ";
-        leaf "("; walkExp k e2; leaf ")"
-      ]
-*)
+      if x = "_" then
+        inner [walkExp k e1; leaf "; "; walkExp k e2]
+      else
+        inner [
+          leaf (spr "let %s = " x); walkExp k e1; leaf " in ";
+          leaf "("; walkExp k e2; leaf ")"
+        ]
 
 let rec walkTree
   : int -> int -> printing_tree

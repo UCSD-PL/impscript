@@ -850,7 +850,11 @@ let coerce (e, s, t) =
   else if not !Settings.castInsertionMode then
     Err (eTcErr (spr "not a subtype:\n%s\n%s" s1 s2) e)
   else if compatible s t then
-    Ok (expWithInfo (eApp (eTcInsert (eCast s t)) [e]) (Typ t), true)
+    Ok (expWithInfo (eApp (eCast s t) [e]) (Typ t), true)
+    (* requiring that the _calling context_ wrap with eTcInsert, in order to
+       avoid double wrapping in the case where the inserted cast gets hoisted
+       out into an assignment statement. *)
+    (* Ok (expWithInfo (eApp (eTcInsert (eCast s t)) [e]) (Typ t), true) *)
   else
     Err (eTcErr (spr "not compatible:\n%s\n%s" s1 s2) e)
 
@@ -1288,7 +1292,8 @@ and tcApp2 typeEnv heapEnv outFun eFun eArgs tFun =
   let tAnys = List.map (function _ -> TAny) eArgs in
   run coerce (eFun, tFun, pureArrow tAnys TAny)
     (fun eFun -> Err (eApp eFun eArgs))
-    (fun eFun _ ->
+    (fun eFun insertedCast ->
+       let eFun = if insertedCast then eTcInsert eFun else eFun in
        let (eArgs,maybeOutput) =
          List.fold_left (fun (eArgs,maybeOutput) eArg ->
            match maybeOutput with
@@ -1693,6 +1698,17 @@ and tcCoerce (hoistCasts, typeEnv, heapEnv, e, t, tGoal) =
   run coerce (e, t, tGoal)
     (fun eErr -> Err eErr)
     (fun eOk insertedCast ->
+       (* not calling okE to preserve source type stuffed by coerce *)
+       if not insertedCast then
+         Ok (eOk, (heapEnv, MoreOut.empty))
+       else
+         match hoistCasts, lvalOf e with
+           | true, Some lv ->
+               let sRetry = sAssignLval lv eOk in
+               Err (eTcErrRetry "tcCoerce backtracking" e sRetry)
+           | _ ->
+               Ok (eTcInsert eOk, (heapEnv, MoreOut.empty)))
+(*
        (* if coercion inserted, hoist it out to an assignment if
           possible rather than inserting the cast locally *)
        match insertedCast && hoistCasts, lvalOf e with
@@ -1701,11 +1717,15 @@ and tcCoerce (hoistCasts, typeEnv, heapEnv, e, t, tGoal) =
             Err (eTcErrRetry "tcCoerce backtracking" e sRetry)
         | _ ->
             Ok (eOk, (heapEnv, MoreOut.empty)))
+*)
 
 let removeTcInserts prog =
   mapStmt (* keep in sync with what tc can insert *)
     (function
-      | EApp({exp=ETcInsert{exp=ECast _}},[eArg]) -> eArg.exp
+      (* | EApp({exp=ETcInsert{exp=ECast _}},[eArg]) -> eArg.exp *)
+      | EApp({exp=ETcInsert{exp=ECast _}},[eArg]) ->
+          failwith "removeTcInserts: cast should've been inserted differently"
+      | ETcInsert({exp=EApp({exp=ECast _},[eArg])}) -> eArg.exp
       | ETcInsert({exp=EFold(_,e)}) -> e.exp
       | ETcInsert({exp=ELet(_,e,_)}) -> e.exp
       | e -> e)

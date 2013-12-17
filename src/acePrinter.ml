@@ -38,6 +38,7 @@ type printing_tree =
   | Tab of int
   | Newline
   | HighlightError of printing_tree
+  | HideInComment of printing_tree
 
 let leaf  ?(ann="") s = Leaf  (s, ann)
 let inner ?(ann="") l = Inner (l, ann)
@@ -145,24 +146,33 @@ fun k stmt -> match stmt.stmt with
         leaf (spr "type %s%s = %s;" x tvars (P.strMu mu)); Newline;
         Tab k; walkStmt k s
       ]
-(*
-  | STcInsert({stmt=SVarInvariant(x,t,s)}) ->
-      spr "[invariant %s : %s;]\n%s%s" x (strTyp t) (tab k) (strStmt k s)
-  | STcInsert({stmt=SClose(xs,s)}) ->
-      spr "[close {%s};]\n%s%s" (commas xs) (tab k) (strStmt k s)
-*)
+  | STcInsert ({stmt = SSeq (s1, s2)}) ->
+      inner [
+        HideInComment (walkStmt k s1); Newline;
+        Tab k; walkStmt k s2
+      ]
+  | STcInsert ({stmt = SVarInvariant (x, t, s)}) ->
+      inner [
+        HideInComment
+          (inner [leaf (spr "invariant %s : %s" x (P.strTyp t)); semi "TODO"]);
+        Newline; Tab k; walkStmt k s
+      ]
+  | STcInsert ({stmt = SClose (xs, s)}) ->
+      inner [
+        HideInComment
+          (inner [leaf (spr "close {%s}" (P.commas xs)); semi "TODO"]);
+        Newline; Tab k; walkStmt k s
+      ]
   | STcInsert s ->
-      (* TODO fix parsing/unparsing issues with tc inserts *)
-      (* inner [leaf "["; walkStmt k s; leaf "]"] *)
-      inner [leaf ""; walkStmt k s; leaf ""]
+      HideInComment (walkStmt k s)
   | SVarInvariant (x, t, s) ->
       inner [
-        leaf (spr "invariant %s : %s;" x (P.strTyp t)); Newline;
+        leaf (spr "invariant %s : %s" x (P.strTyp t)); semi "TODO"; Newline;
         Tab k; walkStmt k s
       ]
   | SClose (xs, s) ->
       inner [
-        leaf (spr "close {%s};" (P.commas xs)); Newline;
+        leaf (spr "close {%s}" (P.commas xs)); semi "TODO"; Newline;
         Tab k; walkStmt k s
       ]
 
@@ -179,10 +189,12 @@ fun k exp -> match exp.exp with
         Tab k; leaf ~ann:(strWorldEnv body) "}"
       ]
   | EApp (e, es) ->
-      (* TODO have tc stuff inferred instantiations in info *)
       let treeFun = walkExp k e in
       let treeArgs = treeCommas (List.map (walkExp k) es) in
-      inner [treeFun; leaf " ("; treeArgs; leaf ~ann:(P.strPreTyp exp.pt_e) ")"]
+      inner [
+        treeFun; leaf " "; leaf ~ann:"TODO" "(";
+        treeArgs; leaf ~ann:(P.strPreTyp exp.pt_e) ")"
+      ]
   (* TODO annotated functions *)
   | EAs (e, pt) ->
       inner [walkExp k e; leaf (spr " as (%s)" (P.strPreTyp pt))]
@@ -216,7 +228,7 @@ fun k exp -> match exp.exp with
   | EUnfold (mu, e) ->
       inner [leaf (spr "unfold (%s, " (P.strMu mu)); walkExp k e; leaf ")"]
   | ETcInsert e ->
-      inner [leaf "["; walkExp k e; leaf "]"]
+      HideInComment (walkExp k e)
   | ELet (x, e1, e2) ->
       inner [
         leaf (spr "let %s = " x); walkExp k e1; leaf " in ";
@@ -227,24 +239,41 @@ let rec walkTree
   : int -> int -> printing_tree
  -> (string * int * int * tooltip list * highlight_range list) =
 fun row col -> function
+
   | Newline ->
       ("\n", row + 1, 1, [], [])
+
   | Tab k ->
       let s = P.tab k in
       (s, row, col + String.length s, [], [])
+
   | Leaf (s, ann) ->
       let tips = if ann = "" then [] else [(row, col, ann)] in
       (s, row, col + String.length s, tips, [])
+
   | Inner (l, ann) ->
       let tips = if ann = "" then [] else [(row, col, ann)] in
       List.fold_left (fun (acc,row,col,tips,ranges) tree ->
         let (s,row,col,tips',ranges') = walkTree row col tree in
         (acc ^ s, row, col, tips @ tips', ranges @ ranges')
       ) ("", row, col, tips, []) l
+
   | HighlightError tr ->
       let (s,row',col',tips,ranges) = walkTree row col tr in
       let highlightRange = ((row-1, col-1), (row'-1, col'-1)) in
       (s, row', col', tips, highlightRange :: ranges)
+
+  | HideInComment tr ->
+      let (pre,suf) = ("/*: ", " */") in
+      let preSingle = ("//: ") in
+      let len = String.length in
+      let _ = assert (len preSingle = len pre) in
+      let (s,row',col',tips,ranges) = walkTree row (col + len pre) tr in
+
+      (* choose either multi- or single-line comment *)
+      if Str.string_match (Str.regexp ".*\n") s 0
+      then (spr "%s%s%s" pre s suf, row', col' + len suf, tips, ranges)
+      else (spr "%s%s" preSingle s, row', col'          , tips, ranges)
 
 let printFileAndTooltips oc tree =
   (* 

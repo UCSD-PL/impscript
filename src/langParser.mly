@@ -31,9 +31,6 @@ let rec stmtOfBlock : block -> stmt = function
 
   (* ... a couple simple cases ... *)
   | [] -> sSkip
-  (* TODO either change this, and others, to match unparsing, or
-     add flags to certain data constructors...
-  | PSTcInsert(s)::l -> sSeq [sTcInsert (stmtOfBlock [s]); stmtOfBlock l] *)
   | PSTcInsert(s)::l -> sTcInsert (stmtOfBlock (s::l))
   | PSVarDecl(x,Some(e))::l ->
       stmtOfBlock (PSVarDecl (x, None) :: PSVarAssign (x, e) :: l)

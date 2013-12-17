@@ -139,25 +139,33 @@ let rec addPrelude prelude prog =
 let tcCheckCasts prog f =
   Settings.castInsertionMode := false;
   match Typing.typecheck prog with
-   | Typing.Ok _ -> Log.log1 "\n%s\n" (Utils.greenString "TC: OK")
-   | Typing.Err(prog) -> begin
-       Log.log1 "\n%s " (Utils.redString "TC: FAILED!");
+   | Typing.Ok (prog, _) -> begin
+       AcePrinter.print prog (spr "%s.html" f);
+       Log.log1 "\n%s\n" (Utils.greenString "TC: OK");
+      end
+   | Typing.Err prog -> begin
        Printer.printStmt prog (spr "%s.error" f);
+       AcePrinter.print prog (spr "%s.error.html" f);
+       Log.log1 "\n%s\n" (Utils.redString "TC: FAILED!");
      end
 
 let tcInsertCasts prog f =
   Settings.castInsertionMode := true;
   match Typing.typecheck prog with
-   | Typing.Ok(prog',()) -> begin
+   | Typing.Ok (prog', ()) -> begin
        Log.log1 "\n%s\n" (Utils.greenString "TRANSLATION: OK");
-       if true (* TODO compare prog and prog' for meaningful differences *)
-       then Printer.printStmt prog' f;
+       (* TODO compare prog and prog' for meaningful differences *)
+       if true then begin
+         Printer.printStmt prog' f;
+         AcePrinter.print prog' (spr "%s.html" f);
+       end;
        (* sanity check that the inserted casts are sufficient for typing *)
        tcCheckCasts prog' f;
      end
-   | Typing.Err(prog) -> begin
-       Log.log1 "\n%s " (Utils.redString "TRANSLATION: FAILED!");
+   | Typing.Err prog -> begin
        Printer.printStmt prog f;
+       AcePrinter.print prog (spr "%s.html" f);
+       Log.log1 "\n%s\n" (Utils.redString "TRANSLATION: FAILED!");
      end
 
 let parseAndProcessFile f = function

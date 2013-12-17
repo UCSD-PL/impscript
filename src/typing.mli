@@ -1,8 +1,6 @@
 
 open Lang
 
-module TypeEnv : sig type t end
-module HeapEnv : sig type t end
 module MoreOut : sig type t end
 
 type ('a, 'b) result =
@@ -22,16 +20,16 @@ val join   : typ -> typ -> typ
 val coerce : (exp * typ * typ) -> (exp, bool) result
 
 val tcExp
-  : (TypeEnv.t * HeapEnv.t * exp)
- -> (exp, pre_type * HeapEnv.t * MoreOut.t) result
+  : (type_env * heap_env * exp)
+ -> (exp, pre_type * heap_env * MoreOut.t) result
 
 val tcStmt
-  : (TypeEnv.t * HeapEnv.t * stmt)
- -> (stmt, pre_type * HeapEnv.t * MoreOut.t) result
+  : (type_env * heap_env * stmt)
+ -> (stmt, pre_type * heap_env * MoreOut.t) result
 
 val tcAndCoerce
-  : (TypeEnv.t * HeapEnv.t * exp * typ)
- -> (exp, HeapEnv.t * MoreOut.t) result
+  : (type_env * heap_env * exp * typ)
+ -> (exp, heap_env * MoreOut.t) result
 
 val typecheck : stmt -> (stmt, unit) result
 

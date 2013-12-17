@@ -81,6 +81,9 @@ rule token = parse
   | tyvar as s               { TVAR s }
   | locvar as s              { LVAR s }
 
+  | newline white* newline (* preserve blank lines in ImpScript AST *)
+      { Lexing.new_line lexbuf; Lexing.new_line lexbuf; BLANKLINE }
+
   | white       { token lexbuf }
   | newline     { Lexing.new_line lexbuf; token lexbuf }
 

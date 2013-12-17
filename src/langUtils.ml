@@ -1,7 +1,12 @@
 
 open Lang
 
-let wrapExp e      = { exp = e }
+let wrapExp e = {
+  exp = e;
+  pt_e = Typ TPlaceholder;
+  extra_info_e = ""
+}
+
 let eFun xs s      = wrapExp (EFun (xs, s))
 let eStr s         = wrapExp (EBase (VStr s))
 let eBool b        = wrapExp (EBase (VBool b))
@@ -20,7 +25,13 @@ let eUnfold mu e   = wrapExp (EUnfold (mu, e))
 let eTcInsert e    = wrapExp (ETcInsert e)
 let eLet x e1 e2   = wrapExp (ELet (x, e1, e2))
 
-let wrapStmt s     = { stmt = s }
+let wrapStmt s = {
+  stmt = s;
+  pt_s = Typ TPlaceholder;
+  he_s = emptyHeapEnv;
+  extra_info_s = ""
+}
+
 let sRet e         = wrapStmt (SReturn e)
 let sLetRef x s    = wrapStmt (SVarDecl (x, s))
 let sAssign x e    = wrapStmt (SVarAssign (x, e))
@@ -34,6 +45,7 @@ let sMuDef x y s   = wrapStmt (SMuAbbrev (x, y, s))
 let sExp e         = wrapStmt (SExp e)
 let sSet e1 e2 e3  = wrapStmt (SObjAssign (e1, e2, e3))
 let sTcInsert s    = wrapStmt (STcInsert s)
+let sBlankLine     = wrapStmt SBlankLine
 let sSkip          = sExp (eUndef)
 
 let rec sSeq = function
@@ -73,9 +85,11 @@ let isStr = function
 
 (* might want to include an fT parameter for these mappers *)
 
-let rec mapExp fE fS {exp=e} = {exp = mapExp_ fE fS e}
+let rec mapExp fE fS exp =
+  {exp with exp = mapExp_ fE fS exp.exp}
 
-and mapStmt fE fS {stmt=s} = {stmt = mapStmt_ fE fS s}
+and mapStmt fE fS stmt =
+  {stmt with stmt = mapStmt_ fE fS stmt.stmt}
 
 and mapExp_ fE fS = function
   | EBase(v) -> fE (EBase v)
@@ -105,6 +119,7 @@ and mapStmt_ fE fS = function
   | SLoadedSrc(f,s) -> fS (SLoadedSrc (f, mapStmt fE fS s))
   | SExternVal(x,t,s) -> fS (SExternVal (x, t, mapStmt fE fS s))
   | STcInsert(s) -> fS (STcInsert (mapStmt fE fS s))
+  | SBlankLine -> fS SBlankLine
   | SMuAbbrev(x,def,s) -> fS (SMuAbbrev (x, def, mapStmt fE fS s))
   | SObjAssign(e1,e2,e3) ->
       fS (SObjAssign (mapExp fE fS e1, mapExp fE fS e2, mapExp fE fS e3))
@@ -133,6 +148,7 @@ let rec mapTyp foo typ =
    | TMaybe t -> fT (TMaybe (mapTyp foo t))
    | TRefLoc l -> fT (TRefLoc l)
    | TExistsRef (l, mu) -> fT (TExistsRef (l, mapMuType foo mu))
+   | TPlaceholder -> fT TPlaceholder
 
 and mapHeap foo =
   List.map (function
@@ -239,6 +255,8 @@ and foldStmt_ fE fS acc = function
   | SObjAssign(e1,e2,e3) ->
       let acc = List.fold_left (foldExp fE fS) acc [e1;e2;e3] in
       fS acc (SObjAssign (e1, e2, e3))
+  | SBlankLine ->
+      fS acc SBlankLine
 
 (* [e; undefined] is inserted often by LamJS and ImpScript parsing *)
 let removeUndefs stmt =

@@ -1,0 +1,13 @@
+extern val _minus : (num, num) -> (num);
+extern val _eek : (str, str) -> (bool);
+extern val _typeof : (any) -> (str);
+extern val _not : (bool) -> (bool);
+
+var negate; negate = function (x: U (num bool)) -> (U (num bool)) {
+  if (_eek(_typeof(x), "number")) {
+    x = _minus(0, x);
+  } else {
+    x = _not(x);
+  }
+  return x;
+};

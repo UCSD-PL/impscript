@@ -37,9 +37,9 @@ let dsConst = function
   | J.CUndefined -> EBase (VUndef)
   | J.CRegexp _  -> failwith "dsConst CRegexp"
 
-let rec dsExp env e  = { exp = dsExp_ env e }
+let rec dsExp env e = wrapExp (dsExp_ env e)
 
-and dsStmt env s = { stmt = dsStmt_ env s }
+and dsStmt env s = wrapStmt (dsStmt_ env s)
 
 and dsExp_ (env:env) = function
 

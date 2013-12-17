@@ -26,6 +26,7 @@ let rec strTyp = function
   (* | TExistsRef("L",MuVar(x)) -> x *)
   (* | TExistsRef(l,mu) -> spr "exists *%s: %s. ref %s" l (strMu mu) l *)
   | TMaybe(t) -> spr "?(%s)" (strTyp t)
+  | TPlaceholder -> "XXX"
 
 and strArrow ((allLocs,tArgs,h1),(someLocs,tRet,h2)) flag =
   let input = spr "%s%s%s"
@@ -142,6 +143,7 @@ and strEAs k e pt =
   (* spr "%s as %s" (strExp k e) (strPreTyp pt) *)
 
 and strStmt k stmt = match stmt.stmt with
+  | SBlankLine -> "\n"
   | SExp(e) -> spr "%s;" (strExp k e)
   | SReturn(e) -> spr "return %s;" (strExp k e)
   | SVarDecl(x,{stmt=SVarAssign(x',e)}) when x = x' ->
@@ -207,6 +209,9 @@ let rec strStmtAst stmt = match stmt.stmt with
   | SSeq(s1,s2) -> spr "SSeq(%s,%s)" (strStmtAst s1) (strStmtAst s2)
   | SExternVal(x,_,s) -> spr "SExternVal(%s,...,%s)" x (strStmtAst s)
   | SLoadedSrc(_,s) -> spr "SLoadedSrc(...,%s)" (strStmtAst s)
+  | SIf _ -> spr "SIf(...)"
+  | SWhile _ -> spr "SWhile(...)"
+  | SVarInvariant _ -> "SVarInvariant(...)"
   | _ -> "strStmtAst"
 
 let rec strExpAst exp = match exp.exp with

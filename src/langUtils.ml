@@ -45,6 +45,7 @@ let sMuDef x y s   = wrapStmt (SMuAbbrev (x, y, s))
 let sExp e         = wrapStmt (SExp e)
 let sSet e1 e2 e3  = wrapStmt (SObjAssign (e1, e2, e3))
 let sTcInsert s    = wrapStmt (STcInsert s)
+let sBlankLine     = wrapStmt SBlankLine
 let sSkip          = sExp (eUndef)
 
 let rec sSeq = function
@@ -118,6 +119,7 @@ and mapStmt_ fE fS = function
   | SLoadedSrc(f,s) -> fS (SLoadedSrc (f, mapStmt fE fS s))
   | SExternVal(x,t,s) -> fS (SExternVal (x, t, mapStmt fE fS s))
   | STcInsert(s) -> fS (STcInsert (mapStmt fE fS s))
+  | SBlankLine -> fS SBlankLine
   | SMuAbbrev(x,def,s) -> fS (SMuAbbrev (x, def, mapStmt fE fS s))
   | SObjAssign(e1,e2,e3) ->
       fS (SObjAssign (mapExp fE fS e1, mapExp fE fS e2, mapExp fE fS e3))
@@ -253,6 +255,8 @@ and foldStmt_ fE fS acc = function
   | SObjAssign(e1,e2,e3) ->
       let acc = List.fold_left (foldExp fE fS) acc [e1;e2;e3] in
       fS acc (SObjAssign (e1, e2, e3))
+  | SBlankLine ->
+      fS acc SBlankLine
 
 (* [e; undefined] is inserted often by LamJS and ImpScript parsing *)
 let removeUndefs stmt =

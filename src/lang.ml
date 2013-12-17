@@ -139,6 +139,7 @@ and stmt_ =
   | SExternVal of var * typ * stmt
   | SMuAbbrev of ty_abbrev * (ty_var list * mu_type) * stmt
   | STcInsert of stmt
+  | SBlankLine
 
 and exp = {
   exp: exp_;

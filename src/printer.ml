@@ -143,6 +143,7 @@ and strEAs k e pt =
   (* spr "%s as %s" (strExp k e) (strPreTyp pt) *)
 
 and strStmt k stmt = match stmt.stmt with
+  | SBlankLine -> "\n"
   | SExp(e) -> spr "%s;" (strExp k e)
   | SReturn(e) -> spr "return %s;" (strExp k e)
   | SVarDecl(x,{stmt=SVarAssign(x',e)}) when x = x' ->

@@ -1674,6 +1674,9 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
           (fun s -> Err (sMuDef x def s))
           (fun s stuff -> okS_ (sMuDef x def s) stuff)
 
+  | SBlankLine ->
+      okS sBlankLine (Typ tUndef) heapEnv MoreOut.empty
+
 and runTcExp2 (typeEnv, heapEnv) (e1, e2) fError fOk =
   run tcExp (typeEnv, heapEnv, e1)
     (fun e1 -> fError (e1, e2))

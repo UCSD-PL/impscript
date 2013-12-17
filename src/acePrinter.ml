@@ -97,6 +97,8 @@ let strWorldEnv stmt =
 let rec walkStmt : int -> stmt -> printing_tree =
 fun k stmt -> match stmt.stmt with
 
+  | SBlankLine -> leaf ""
+
   | SExp e ->
       inner [walkExp k e; semi (strWorldEnv stmt)]
 
@@ -219,6 +221,7 @@ fun k stmt -> match stmt.stmt with
 
 and walkExp : int -> exp -> printing_tree =
 fun k exp -> match exp.exp with
+
   | EBase v ->
       leaf ~ann:(P.strPreTyp exp.pt_e) (P.strBaseVal v)
 

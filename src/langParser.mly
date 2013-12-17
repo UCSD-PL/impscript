@@ -17,6 +17,7 @@ type parse_stmt = (* TODO attach line info *)
   | PSExternVal of var * typ
   | PSTcInsert of parse_stmt
   | PSMuAbbrev of ty_abbrev * (ty_var list * mu_type)
+  | PSBlankLine
 
 and block = parse_stmt list
 
@@ -40,6 +41,7 @@ let rec stmtOfBlock : block -> stmt = function
   | PSVarAssign(x,e)::l -> sSeq [sAssign x e; stmtOfBlock l]
   | PSObjAssign(e1,e2,e3)::l -> sSeq [sSet e1 e2 e3; stmtOfBlock l]
   | PSReturn(e)::l -> sSeq [sRet e; stmtOfBlock l]
+  | PSBlankLine::l -> sSeq [sBlankLine; stmtOfBlock l]
   | PSWhile(e,s)::l -> sSeq [sWhile e (stmtOfBlock s); stmtOfBlock l]
   | PSIf(e,s1,s2)::l ->
       let (s1,s2) = (stmtOfBlock s1, stmtOfBlock s2) in
@@ -58,6 +60,7 @@ let withDefault default opt = match opt with None -> default | Some x -> x
 %token <string> TVAR
 %token <string> LVAR
 %token
+  BLANKLINE
   EOF NULL UNDEF
   IF ELSE COMMA COLON LBRACE RBRACE SEMI LPAREN RPAREN LBRACK RBRACK LT GT
   (* PIPE *) FUN RET LET IN LETREF EQ EQARROW AS ARROW WHILE DOT QMARK TYPE
@@ -74,6 +77,7 @@ program : b=block EOF { stmtOfBlock b }
 block : l=list(parse_stmt) { l }
 
 parse_stmt :
+ | BLANKLINE                    { PSBlankLine }
  | e=exp SEMI                   { PSExp e }
  | LETREF x=VAR SEMI            { PSVarDecl (x, None) }
  | LETREF x=VAR EQ e =exp SEMI  { PSVarDecl (x, Some e) }

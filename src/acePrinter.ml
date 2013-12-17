@@ -171,14 +171,14 @@ fun k stmt -> match stmt.stmt with
 
   | SExternVal (x, t, s) ->
       inner [
-        hideInComment (leaf (spr "extern val %s : %s;" x (P.strTyp t)));
+        hideInComment (leaf (spr "extern val %s : %s ;" x (P.strTyp t)));
         Newline; Tab k; walkStmt k s
       ]
 
   | SMuAbbrev (x, (ys, mu), s) ->
       let tvars = if ys = [] then "" else spr "(%s)" (P.commas ys) in
       inner [
-        hideInComment (leaf (spr "type %s%s = %s;" x tvars (P.strMu mu)));
+        hideInComment (leaf (spr "type %s%s = %s ;" x tvars (P.strMu mu)));
         Newline; Tab k; walkStmt k s
       ]
 
@@ -286,14 +286,30 @@ fun k exp -> match exp.exp with
   | EUnfold (mu, e) ->
       inner [leaf (spr "unfold (%s, " (P.strMu mu)); walkExp k e; leaf ")"]
 
+  | ETcInsert {exp = ELet (x, e1, e2)} ->
+      inner [
+        tcInserted ~trySingleLine:false (leaf (spr "let %s =" x));
+        leaf " "; walkExp k e1; leaf " ";
+        tcInserted ~trySingleLine:false
+          (inner [leaf "in "; leaf "("; walkExp k e2; leaf ")"])
+      ]
+
   | ETcInsert e ->
       tcInserted ~trySingleLine:false (walkExp k e)
 
+  (* NOTE
+     - keep this in sync with Tc
+     - bare ELet should appear only inside a sequence of tc-inserted inline
+       folds, so don't add any nested comments *)
   | ELet (x, e1, e2) ->
+      if x <> "_" then failwith "AcePrinter.walkExp ELet" else
+      inner [walkExp k e1; leaf "; "; walkExp k e2]
+(*
       inner [
         leaf (spr "let %s = " x); walkExp k e1; leaf " in ";
         leaf "("; walkExp k e2; leaf ")"
       ]
+*)
 
 let rec walkTree
   : int -> int -> printing_tree

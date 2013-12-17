@@ -46,8 +46,11 @@ let inner ?(ann="") l = Inner (l, ann)
 
 let semi ann = inner [leaf " "; leaf ~ann ";"] (* space before ";" *)
 
-let hideInComment tr       = HideInComment (true, tr)
-let hideInCommentSingle tr = HideInComment (false, tr)
+let hideInComment ?(trySingleLine=true) tr = HideInComment (trySingleLine, tr)
+
+let tcInserted ?(trySingleLine=true) tr    = hideInComment ~trySingleLine tr
+ (* if want to distinguish the kind of comments,
+    add something like "[...]" around "inferred" beforehand *)
 
 let sepTrees : string -> printing_tree list -> printing_tree =
 fun sep trees ->
@@ -93,21 +96,41 @@ let strWorldEnv stmt =
 
 let rec walkStmt : int -> stmt -> printing_tree =
 fun k stmt -> match stmt.stmt with
+
   | SExp e ->
       inner [walkExp k e; semi (strWorldEnv stmt)]
+
   | SReturn(e) ->
       inner [leaf "return "; walkExp k e; semi (strWorldEnv stmt)]
+
   | SVarDecl (x, ({stmt = SVarAssign (x', e)} as s0)) when x = x' ->
       inner [leaf (spr "var %s = " x); walkExp k e; semi (strWorldEnv s0)]
-  | SVarDecl (x, {stmt = SSeq (({stmt=SVarAssign (x', e)} as s0), s)}) when x = x' ->
+
+  | SVarDecl (x, {stmt = SSeq (({stmt =
+      SVarAssign (x', {exp = EAs (({exp = EFun _} as eFun), pt)})} as s0), s)})
+        when x = x' ->
+      (* strip annotation, and use sSeq to put sequence back together.
+         sSeq inserts dummy info, okay b/c printing SSeq doesn't use it. *)
+      let s0 = {s0 with stmt = SVarAssign (x, eFun)} in
+      let stmt = {stmt with stmt = SVarDecl (x, LangUtils.sSeq [s0; s])} in
+      inner [
+        hideInComment (leaf (spr "%s :: %s" x (P.strPreTyp pt))); Newline;
+        walkStmt k stmt
+      ]
+
+  | SVarDecl (x, {stmt = SSeq (({stmt = SVarAssign (x', e)} as s0), s)})
+        when x = x' ->
       inner [
         leaf (spr "var %s = " x); walkExp k e; semi (strWorldEnv s0); Newline;
         Tab k; walkStmt k s
       ]
+
   | SVarDecl (x, s) ->
       inner [leaf (spr "var %s" x); semi ""; Newline; Tab k; walkStmt k s]
+
   | SVarAssign (x, e) ->
       inner [leaf (spr "%s = " x); walkExp k e; semi (strWorldEnv stmt)]
+
   | SObjAssign (e1, e2, e3) -> begin
       match LangUtils.isStr e2 with
         (* | Some f ->
@@ -121,8 +144,10 @@ fun k stmt -> match stmt.stmt with
               walkExp k e3; semi (strWorldEnv stmt)
             ]
     end
+
   | SSeq (s1, s2) ->
       inner [walkStmt k s1; Newline; Tab k; walkStmt k s2]
+
   | SIf (e, s1, s2) ->
       inner [
         leaf "if ("; walkExp k e; leaf ") {"; Newline;
@@ -131,51 +156,61 @@ fun k stmt -> match stmt.stmt with
         Tab (succ k); walkStmt (succ k) s2; Newline;
         Tab k; leaf ~ann:(strWorldEnv stmt) "}"
       ]
+
   | SWhile (e, s) ->
       inner [
         leaf "while ("; walkExp k e; leaf ") {"; Newline;
         Tab (succ k); walkStmt (succ k) s; Newline;
         Tab k; leaf ~ann:(strWorldEnv stmt) "}"
       ]
+
   | SLoadedSrc (_, s) -> (* not using file names... *)
       walkStmt k s
+
   | SExternVal (x, t, s) ->
       inner [
-        leaf (spr "extern val %s : %s;" x (P.strTyp t)); Newline;
-        Tab k; walkStmt k s
+        hideInComment (leaf (spr "extern val %s : %s;" x (P.strTyp t)));
+        Newline; Tab k; walkStmt k s
       ]
+
   | SMuAbbrev (x, (ys, mu), s) ->
       let tvars = if ys = [] then "" else spr "(%s)" (P.commas ys) in
       inner [
-        leaf (spr "type %s%s = %s;" x tvars (P.strMu mu)); Newline;
-        Tab k; walkStmt k s
+        hideInComment (leaf (spr "type %s%s = %s;" x tvars (P.strMu mu)));
+        Newline; Tab k; walkStmt k s
       ]
+
   | STcInsert ({stmt = SSeq (s1, s2)}) ->
       inner [
-        hideInComment (walkStmt k s1); Newline;
+        tcInserted (walkStmt k s1); Newline;
         Tab k; walkStmt k s2
       ]
+
   | STcInsert ({stmt = SVarInvariant (x, t, s)} as s0) ->
       inner [
-        hideInComment
+        tcInserted
           (inner [leaf (spr "invariant %s : %s" x (P.strTyp t));
                   semi s0.extra_info_s]);
         Newline; Tab k; walkStmt k s
       ]
+
   | STcInsert ({stmt = SClose (xs, s)} as s0) ->
       inner [
-        hideInComment
+        tcInserted
           (inner [leaf (spr "close {%s}" (P.commas xs));
                   semi s0.extra_info_s]);
         Newline; Tab k; walkStmt k s
       ]
+
   | STcInsert s ->
-      hideInComment (walkStmt k s)
+      tcInserted (walkStmt k s)
+
   | SVarInvariant (x, t, s) ->
       inner [
         leaf (spr "invariant %s : %s" x (P.strTyp t)); semi stmt.extra_info_s;
         Newline; Tab k; walkStmt k s
       ]
+
   | SClose (xs, s) ->
       inner [
         leaf (spr "close {%s}" (P.commas xs)); semi stmt.extra_info_s;
@@ -186,14 +221,17 @@ and walkExp : int -> exp -> printing_tree =
 fun k exp -> match exp.exp with
   | EBase v ->
       leaf ~ann:(P.strPreTyp exp.pt_e) (P.strBaseVal v)
+
   | EVarRead x ->
       leaf ~ann:(P.strPreTyp exp.pt_e) x
+
   | EFun (xs, body) ->
       inner [
         leaf (spr "function (%s) {" (P.commas xs)); Newline;
         Tab (succ k); walkStmt (succ k) body; Newline;
         Tab k; leaf ~ann:(strWorldEnv body) "}"
       ]
+
   | EApp (e, es) ->
       let treeFun = walkExp k e in
       let treeArgs = treeCommas (List.map (walkExp k) es) in
@@ -201,13 +239,19 @@ fun k exp -> match exp.exp with
         treeFun; leaf " "; leaf ~ann:exp.extra_info_e "(";
         treeArgs; leaf ~ann:(P.strPreTyp exp.pt_e) ")"
       ]
-  (* TODO annotated functions *)
+
   | EAs (e, pt) ->
-      inner [walkExp k e; leaf (spr " as (%s)" (P.strPreTyp pt))]
+      inner [
+        hideInComment ~trySingleLine:false (leaf (P.strPreTyp pt)); leaf " ";
+        walkExp k e
+      ]
+
   | ECast arrow ->
       leaf (spr "(%s)" (P.strArrow arrow false))
+
   | EObj [] ->
       leaf ~ann:(P.strPreTyp exp.pt_e) "{}"
+
   | EObj fes ->
       (* could insert Newlines when expressions are too long *)
       let l =
@@ -215,26 +259,33 @@ fun k exp -> match exp.exp with
           (fun (f,e) -> inner [leaf (spr "%s = " f); walkExp k e]) fes in
       let ann = P.strPreTyp exp.pt_e in
       inner ~ann [leaf "{ "; treeCommas l; leaf " }"]
+
   | EObjRead (e1, e2) ->
       let ann = P.strPreTyp exp.pt_e in
       (match LangUtils.isStr e2 with
         (* | Some f -> inner ~ann [walkExp k e1; leaf "."; leaf f] *)
         | _  -> inner [walkExp k e1; leaf "["; walkExp k e2; leaf ~ann "]"])
+
   | ETcErr (ann, {exp = EBase VStr "XXX"}, _) -> (* see Typing.sTcErr *)
       HighlightError (inner [
         leaf "!!! "; leaf ~ann "TC_ERROR"; leaf " !!!"
       ])
+
   | ETcErr (ann, e, _) ->
       HighlightError (inner [
         leaf "!!! "; leaf ~ann "TC_ERROR";
         leaf " ( "; walkExp k e; leaf " ) !!!"
       ])
+
   | EFold (mu, e) ->
       inner [leaf (spr "fold (%s, " (P.strMu mu)); walkExp k e; leaf ")"]
+
   | EUnfold (mu, e) ->
       inner [leaf (spr "unfold (%s, " (P.strMu mu)); walkExp k e; leaf ")"]
+
   | ETcInsert e ->
-      hideInCommentSingle (walkExp k e)
+      tcInserted ~trySingleLine:false (walkExp k e)
+
   | ELet (x, e1, e2) ->
       inner [
         leaf (spr "let %s = " x); walkExp k e1; leaf " in ";

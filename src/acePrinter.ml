@@ -26,11 +26,18 @@ type hover_annotation = string
 
 type tooltip = int * int * hover_annotation
 
+type row = int
+
+type col = int
+
+type highlight_range = (row * col) * (row * col)
+
 type printing_tree =
   | Leaf of string * hover_annotation
   | Inner of printing_tree list * hover_annotation
   | Tab of int
   | Newline
+  | HighlightError of printing_tree
 
 let leaf  ?(ann="") s = Leaf  (s, ann)
 let inner ?(ann="") l = Inner (l, ann)
@@ -195,12 +202,15 @@ fun k exp -> match exp.exp with
       (match LangUtils.isStr e2 with
         (* | Some f -> inner ~ann [walkExp k e1; leaf "."; leaf f] *)
         | _  -> inner [walkExp k e1; leaf "["; walkExp k e2; leaf ~ann "]"])
-  | ETcErr(s,e,_) ->
-      (* TODO deal with error messages *)
-      let s = Str.global_replace (Str.regexp "\n") " " s in
-      inner [
-        leaf "[[[ "; walkExp k e; leaf " !!! TC ERROR !!! "; leaf s; leaf " ]]]"
-      ]
+  | ETcErr (ann, {exp = EBase VStr "XXX"}, _) -> (* see Typing.sTcErr *)
+      HighlightError (inner [
+        leaf "!!! "; leaf ~ann "TC_ERROR"; leaf " !!!"
+      ])
+  | ETcErr (ann, e, _) ->
+      HighlightError (inner [
+        leaf "!!! "; leaf ~ann "TC_ERROR";
+        leaf " ( "; walkExp k e; leaf " ) !!!"
+      ])
   | EFold (mu, e) ->
       inner [leaf (spr "fold (%s, " (P.strMu mu)); walkExp k e; leaf ")"]
   | EUnfold (mu, e) ->
@@ -214,22 +224,27 @@ fun k exp -> match exp.exp with
       ]
 
 let rec walkTree
-  : int -> int -> printing_tree -> (string * int * int * tooltip list) =
+  : int -> int -> printing_tree
+ -> (string * int * int * tooltip list * highlight_range list) =
 fun row col -> function
   | Newline ->
-      ("\n", row + 1, 1, [])
+      ("\n", row + 1, 1, [], [])
   | Tab k ->
       let s = P.tab k in
-      (s, row, col + String.length s, [])
+      (s, row, col + String.length s, [], [])
   | Leaf (s, ann) ->
       let tips = if ann = "" then [] else [(row, col, ann)] in
-      (s, row, col + String.length s, tips)
+      (s, row, col + String.length s, tips, [])
   | Inner (l, ann) ->
       let tips = if ann = "" then [] else [(row, col, ann)] in
-      List.fold_left (fun (acc,row,col,tips) tree ->
-        let (s,row,col,tips') = walkTree row col tree in
-        (acc ^ s, row, col, tips @ tips')
-      ) ("", row, col, tips) l
+      List.fold_left (fun (acc,row,col,tips,ranges) tree ->
+        let (s,row,col,tips',ranges') = walkTree row col tree in
+        (acc ^ s, row, col, tips @ tips', ranges @ ranges')
+      ) ("", row, col, tips, []) l
+  | HighlightError tr ->
+      let (s,row',col',tips,ranges) = walkTree row col tr in
+      let highlightRange = ((row-1, col-1), (row'-1, col'-1)) in
+      (s, row', col', tips, highlightRange :: ranges)
 
 let printFileAndTooltips oc tree =
   (* 
@@ -237,7 +252,7 @@ let printFileAndTooltips oc tree =
      - using single quotes when writing JavaScript to HTML page,
        and double quotes for ImpScript string literals
   *)
-  let (s,_,_,tips) = walkTree 1 1 tree in
+  let (s,_,_,tips,ranges) = walkTree 1 1 tree in
   let s = replacePrimes s in
   let s = Str.global_replace (Str.regexp "\n") "',\n  '" s in
 
@@ -266,6 +281,11 @@ let printFileAndTooltips oc tree =
   (* instead, could track using data constructors for hover_annotation
      List.iter
        (fun (i,j,s) -> fpr oc "addAnnot(%4d, %3d, '%s');\n" i j s) tips; *)
+
+  List.iter (fun ((r1,c1), (r2,c2)) ->
+    let sRange = spr "new Range(%d, %d, %d, %d)" r1 c1 r2 c2 in
+    fpr oc "editor.session.addMarker(%s, 'ace_step', 'error');\n\n" sRange
+  ) ranges;
 
   ()
 
@@ -301,5 +321,6 @@ let print stmt fHtml =
   foo ();
 
   Log.log1 "Wrote to %s.\n" fHtml;
+  fpr (open_out Settings.out_html_filename) "%s\n" fHtml;
   ()
 

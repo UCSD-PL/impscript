@@ -1,0 +1,4 @@
+extern val _plus : (num, num) -> (num);
+var i; i = 0;
+var j; j = undefined;
+_plus(i, j);

@@ -816,7 +816,7 @@ let runHandleError foo args fError =
   run foo args fError (fun a b -> Ok (a, b))
 
 let errE s e       = Err (eTcErr s e)
-let sTcErr s stmt  = sSeq [sExp (eTcErr s (eStr "")); stmt]
+let sTcErr s stmt  = sSeq [sExp (eTcErr s (eStr "XXX")); stmt]
 let errS s stmt    = Err (sTcErr s stmt)
 
 (* stuff synthesized information inside the rewritten exp/stmt: *)
@@ -1601,7 +1601,9 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
                       let rt' = TRecd (ExactDomain, [(f,t3)]) in
                       let rt = extendRecdType rt rt' in
                       let heapEnv = HeapEnv.addLoc l (HRecd rt) heapEnv in
-                      okS (sSet e1 e2 e3) (addExists locs3 (Typ t3)) heapEnv out
+                      (* same thing with chaining VarAssign
+                      okS (sSet e1 e2 e3) (addExists locs3 (Typ t3)) heapEnv out *)
+                      okS (sSet e1 e2 e3) (addExists locs3 (Typ tUndef)) heapEnv out
                   | Some(HMu(Mu _ as mu))
                   | Some(HMu(MuAbbrev _ as mu)) ->
                       let err = spr "need to unfold: %s" (strMu mu) in

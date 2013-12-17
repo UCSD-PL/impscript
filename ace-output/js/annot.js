@@ -90,7 +90,8 @@ function addAnnot(row, col, ann) {
 /********************************************************************************/
 
 var editor = ace.edit("editor");
-editor.setTheme("ace/theme/chaos");
+//editor.setTheme("ace/theme/chaos");
+editor.setTheme("ace/theme/clouds");
 editor.setReadOnly(true);
 
 //var SrcMode = require("ace/mode/haskell").Mode;

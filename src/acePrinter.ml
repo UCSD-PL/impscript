@@ -69,23 +69,25 @@ let treeCommas = sepTrees " , " (* space before "," *)
 let replacePrimes s =
   Str.global_replace (Str.regexp "'") "`" s
 
-let strHeapEnvBinding = function
-  | HMu mu   -> P.strMu mu
-  | HRecd rt -> P.strRecdType rt
+let strPairHeapEnvBinding = function
+  | (l, HEMu mu   ) -> (spr "*%s" (P.strLoc l), spr " : %s" (P.strMu mu))
+  | (l, HERecd rt ) -> (spr "*%s" (P.strLoc l), spr " : %s" (P.strRecdType rt))
+  | (l, HEProxy l') -> (spr " %s" (P.strLoc l), spr " > %s" (P.strLoc l'))
 
 let strHeapEnv he =
   let width = ref 0 in (* length of widest domain string *)
-  let strHeapBind s =
-    let s = spr "*%s" s in
+  let recordWidth s =
     if String.length s > !width then width := String.length s;
     s
   in
   []
   |> VarMap.fold (fun x pt acc ->
-       (strHeapBind x, spr " : %s" (P.strPreTyp pt)) :: acc
+       (recordWidth (spr "*%s" x), spr " : %s" (P.strPreTyp pt)) :: acc
      ) he.vars
-  |> LocMap.fold (fun l hb acc ->
-       (strHeapBind (P.strLoc l), spr " : %s" (strHeapEnvBinding hb)) :: acc
+  |> LocMap.fold (fun l heb acc ->
+       let (s1, s2) = strPairHeapEnvBinding (l, heb) in
+       let _ = recordWidth s1 in
+       (s1, s2) :: acc
      ) he.locs
   |> List.rev
   |> List.map (fun (s1,s2) -> spr "%*s%s" (-1 * !width) s1 s2)
@@ -288,12 +290,24 @@ fun k exp -> match exp.exp with
       let ann = exp.extra_info_e in
       inner [leaf (spr "unfold (%s, " (P.strMu mu)); walkExp k e; leaf ~ann ")"]
 
-  | ETcInsert {exp = ELet (x, e1, e2)} ->
+  (* Tc.genSym names temporaries starting with "__" *)
+  | ETcInsert {exp = ELet (x, e1, e2)} when Utils.strPrefix x "__" ->
       inner [
         tcInserted ~trySingleLine:false (leaf (spr "let %s =" x));
         leaf " "; walkExp k e1; leaf " ";
         tcInserted ~trySingleLine:false
           (inner [leaf "in "; leaf "("; walkExp k e2; leaf ")"])
+      ]
+
+  (* Tc.inlineUnfold *)
+  | ETcInsert {exp = ELet ("_",
+        ({exp = EUnfold (_, {exp = EVarRead x})} as eUn),
+        ({exp = EVarRead x'} as eX))} when x = x' ->
+      inner [
+        tcInserted ~trySingleLine:false
+          (inner [leaf "let _ = "; walkExp k eUn; leaf " in ("]);
+        leaf " "; walkExp k eX; leaf " ";
+        tcInserted ~trySingleLine:false (leaf ")")
       ]
 
   | ETcInsert e ->

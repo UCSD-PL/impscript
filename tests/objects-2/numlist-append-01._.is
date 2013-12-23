@@ -1,0 +1,16 @@
+extern val _not : (bool) -> (bool);
+extern val _eqnull : (any) -> (bool);
+
+type numlist = mu 'x. {hd: num, tl: ?(ref('x))};
+
+var append = function (all Lthis, Lys. this:*Lthis, ys:?(*Lys) / *Lthis: numlist, *Lys: numlist)
+                   -> (any / *Lthis: numlist) {
+  var xs = this;
+  while (_not (_eqnull (xs.tl))) {
+    xs = xs.tl;
+  }
+  xs.tl = ys;
+  fold (numlist, xs);
+};
+
+0;

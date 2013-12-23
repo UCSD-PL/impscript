@@ -1,0 +1,18 @@
+extern val _not : (bool) -> (bool);
+extern val _eqnull : (any) -> (bool);
+
+type numlist = mu 'x. {hd: num, tl: ?(ref('x))};
+
+var append = function (all Lthis, Lys. this:*Lthis, ys:?(*Lys) / *Lthis: numlist, *Lys: numlist)
+                   -> (any / *Lthis: numlist) {
+  var xs = this;
+  while (_not (_eqnull (let _ = unfold (numlist, xs) in
+                       (let _b = xs.tl in
+                       (let _ = fold (numlist, xs) in
+                       (_b)))))) {
+    xs = xs.tl;
+  }
+  (** shouldn't be able to use original pointer because of join **)
+  this.hd;
+  xs.tl = ys;
+};

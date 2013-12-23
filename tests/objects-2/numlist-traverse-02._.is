@@ -1,0 +1,12 @@
+extern val _eqnull : (any) -> (bool);
+
+type numlist = mu 'x. {hd: num, tl: ?(ref('x))};
+
+var traverse = function traverse (all L1. xs:?(*L1) / *L1: numlist)
+                              -> (some L2. *L2      / *L2: numlist) {
+  if (_eqnull (xs.tl)) {
+    return xs;
+  } else {
+    return traverse (xs.tl);
+  }
+};

@@ -51,11 +51,11 @@ and mu_type =
   | MuVar of ty_var
   | MuAbbrev of ty_abbrev * typ list
 
-and loc_binding =
+and heap_binding =
   | HRecd of recd_type
   | HMu of mu_type
 
-and heap = (loc * loc_binding) list
+and heap = (loc * heap_binding) list
 
 module RelySet =
   Set.Make (struct type t = (var * typ) let compare = compare end)
@@ -82,6 +82,11 @@ type type_env_binding =
   | StrongRef
   | InvariantRef of typ
 
+type heap_env_binding =
+  | HERecd of recd_type
+  | HEMu of mu_type
+  | HEProxy of loc
+
 type type_env = {
   bindings: type_env_binding VarMap.t;
   loc_vars: Vars.t;
@@ -92,7 +97,7 @@ type type_env = {
 
 type heap_env = {
   vars: pre_type VarMap.t;
-  locs: loc_binding LocMap.t;
+  locs: heap_env_binding LocMap.t;
 }
 
 let emptyHeapEnv =

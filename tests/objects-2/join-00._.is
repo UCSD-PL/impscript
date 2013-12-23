@@ -1,0 +1,9 @@
+var f = function (all Lx. x:*Lx, b:bool / *Lx: {f: num})
+              -> (num / *Lx: {f: num}) {
+  if (b) { x = {f = 10}; }
+  return x.f;
+};
+
+var y = {f = 1};
+f(y, true);
+y.f;

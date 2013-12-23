@@ -87,9 +87,9 @@ parse_stmt :
  | e1=exp DOT f=VAR EQ e3=exp SEMI             { PSObjAssign (e1, eStr f, e3) }
  | e1=exp LBRACK e2=exp RBRACK EQ e3=exp SEMI  { PSObjAssign (e1, e2, e3) }
 
- | IF LPAREN e=exp RPAREN LBRACE s1=block RBRACE
-   ELSE LBRACE s2=block RBRACE                     { PSIf (e,s1,s2) }
  | WHILE LPAREN e=exp RPAREN LBRACE s=block RBRACE { PSWhile(e,s) } 
+ | IF LPAREN e=exp RPAREN LBRACE s1=block RBRACE s2=option(else_stmt)
+     { PSIf (e, s1, withDefault [] s2) }
 
  | EXTERN VAL x=VAR COLON t=typ SEMI { PSExternVal (x,t) }
  | INVARIANT x=VAR COLON t=typ SEMI { PSVarInvariant (x,t) }
@@ -99,6 +99,9 @@ parse_stmt :
  | TYPE x=VAR EQ mu=mu_type_def SEMI { PSMuAbbrev (x, ([], mu)) }
  | TYPE x=VAR LPAREN ys=separated_list(COMMA,TVAR) RPAREN
    EQ mu=mu_type_def SEMI { PSMuAbbrev (x, (ys, mu)) }
+
+else_stmt :
+ | ELSE LBRACE s=block RBRACE { s }
 
 base_val :
  | b=VBOOL { VBool b }

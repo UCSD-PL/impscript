@@ -163,9 +163,11 @@ let (genLocConst,clearLocConstCounter) =
   (fun ?(name="") () -> incr i; spr "lJoin%s_%d" name !i),
   (fun () -> i := 0)
 
+(* be careful not to generate "L1", "L2", etc.
+   since these are likely to appear in source programs *)
 let (genLocVar,clearLocVarCounter) =
   let i = ref 0 in
-  (fun ?(name="") () -> incr i; spr "L%s_%d" name !i),
+  (fun ?(name="anon") () -> incr i; spr "L%d_%s" !i name),
   (fun () -> i := 0)
 
 let (genSym,clearTmpCounter) =
@@ -563,7 +565,7 @@ fun (TRecd(width,fts)) ->
   let existentialLocs = ref [] in
   let foo = function
     | TExistsRef(l,mu) ->
-        let l = genLocVar () in
+        let l = genLocVar ~name:"unpack" () in
         let _ = existentialLocs := l :: !existentialLocs in
         TRefLoc (LVar l)
     | t -> t
@@ -685,6 +687,11 @@ fun xs ->
   let freshenOne x = genLocVar ~name:x () in
   let ys = List.map freshenOne xs in
   List.combine xs (List.map (fun y -> LVar y) ys)
+
+let strLocSubst : loc_subst -> string =
+fun subst ->
+  String.concat ", "
+    (List.map (fun (lvar,loc) -> spr "%s := %s" lvar (strLoc loc)) subst)
 
 let transitiveAssumeVars f heapEnv =
   let rec doOne f acc =
@@ -1390,6 +1397,12 @@ and tcAppPoly typeEnv heapEnv outFun eFun eArgs arrow =
        match substAndHeapEnv with
         | None -> Err (eTcErr "couldn't infer instantiations" (eApp eFun eArgs))
         | Some (subst, heapEnv) ->
+            let locActuals = List.map snd subst in
+            if locActuals <> Utils.removeDupes locActuals then
+              Err (eTcErr
+                (spr "inferred loc instantations contains a duplicate:\n\n%s"
+                   (strLocSubst subst)) (eApp eFun eArgs))
+            else
             let tArgsExpected = List.map (applySubst subst) tArgsExpected in
             let obligations = List.combine tArgsActual tArgsExpected in
             let (eArgs,allOk) =
@@ -1419,12 +1432,8 @@ and tcAppPoly typeEnv heapEnv outFun eFun eArgs arrow =
                     let ptRet = addExists existentialLocs (Typ tRet) in
                     let ann =
                       if List.length subst = 0 then ""
-                      else
-                        spr "inferred location instantiations:\n\n%s" 
-                        (String.concat ", "
-                           (List.map (fun (lvar,loc) ->
-                              spr "%s := %s" lvar (strLoc loc)
-                           ) subst)) in
+                      else spr "inferred location instantiations:\n\n%s" 
+                             (strLocSubst subst) in
                     let eApp = expWithExtraInfo (eApp eFun eArgs) ann in
                     okE eApp ptRet heapEnv out
                 | YesIf (_, folds) ->

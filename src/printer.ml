@@ -19,9 +19,9 @@ let rec strTyp = function
   | TArrow(arrow) -> strArrow arrow true
   | TUnion(ts) -> spr "U (%s)" (String.concat " " (List.map strTyp ts))
   (* | TUnion(ts) -> spr "(%s)" (String.concat " | " (List.map strTyp ts)) *)
-  (* | TRefLoc(l) -> spr "ref(%s)" (strLoc l) *)
+  | TRefLoc(l) -> spr "ref(%s)" (strLoc l)
   (* | TRefLoc(l) -> spr "<%s>" (strLoc l) *)
-  | TRefLoc(l) -> spr "*%s" (strLoc l)
+  (* | TRefLoc(l) -> spr "*%s" (strLoc l) *)
   | TExistsRef(_,mu) -> spr "ref(%s)" (strMu mu)
   (* | TExistsRef("L",MuVar(x)) -> x *)
   (* | TExistsRef(l,mu) -> spr "exists *%s: %s. ref %s" l (strMu mu) l *)

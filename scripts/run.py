@@ -44,6 +44,7 @@ def runTests(color, header, pattern):
 runTests(bcolors.YELLOW, "UNANNOTATED JAVASCRIPT (MAY FAIL)", ".*.js$")
 
 runTests(bcolors.RED, "NEGATIVE TESTS", "^xx[^.]*.is$")
+runTests(bcolors.RED, "NEGATIVE TESTS", "^xx[^.]*._.is$")
 
 runTests(bcolors.GREEN, "POSITIVE TESTS", "[^x][^x][^.]*.is$")
 runTests(bcolors.GREEN, "POSITIVE TESTS", "[^x][^x][^.]*._.is$")

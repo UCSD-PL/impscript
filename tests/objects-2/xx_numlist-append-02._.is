@@ -1,0 +1,27 @@
+extern val _plus : (num, num) -> (num);
+extern val _not : (bool) -> (bool);
+extern val _eqnull : (any) -> (bool);
+
+type numlist = mu 'x. {hd: num, tl: ?(ref('x))};
+
+var append = function (all Lxs, Lys. xs:?(*Lxs), ys:?(*Lys) / *Lxs: numlist, *Lys: numlist)
+                   -> (any / *Lxs: numlist) {
+  while (_not (_eqnull (xs.tl))) {
+    xs = xs.tl;
+  }
+  xs.tl = ys;
+  (** TODO infer **)
+  fold (numlist, xs);
+};
+
+var list0 = {hd=0, tl=null};
+var list1 = {hd=1, tl=null};
+
+_plus(list0.hd, list1.hd);
+
+append(list0, list1);
+append(list0, list0); (** TC ERROR: SAME LOCATION ARGUMENT **)
+
+_plus(list0.hd, list0.hd);
+
+0;

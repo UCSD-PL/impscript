@@ -10,6 +10,7 @@ var append = function (all Lthis, Lys. this:*Lthis, ys:?(*Lys) / *Lthis: numlist
     xs = xs.tl;
   }
   xs.tl = ys;
+  (** TODO infer **)
   fold (numlist, xs);
 };
 

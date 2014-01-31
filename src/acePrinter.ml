@@ -52,16 +52,18 @@ let tcInserted ?(trySingleLine=true) tr    = hideInComment ~trySingleLine tr
  (* if want to distinguish the kind of comments,
     add something like "[...]" around "inferred" beforehand *)
 
-let sepTrees : string -> printing_tree list -> printing_tree =
+let sepTrees : printing_tree -> printing_tree list -> printing_tree =
 fun sep trees ->
   let rec foo = function
     | []    -> []
     | t::[] -> [t]
-    | t::ts -> t :: leaf sep :: foo ts
+    | t::ts -> t :: sep :: foo ts
   in
   inner (foo trees)
 
-let treeCommas = sepTrees " , " (* space before "," *)
+let treeCommas = sepTrees (leaf " , ") (* space before "," *)
+
+let treeCommasAndNewlines k = sepTrees (inner [leaf " ,"; Newline; Tab k])
 
 (* ImpScript type variable syntax conflicts with JavaScript string literals.
    TODO for compatibility with the HTML files, could change ImpScript to parse
@@ -96,6 +98,12 @@ let strHeapEnv he =
 let strWorldEnv stmt =
   spr "%s\n\n%s" (P.strPreTyp stmt.pt_s) (strHeapEnv stmt.he_s)
 
+let rec containsNewline = function
+  | Newline -> true
+  | Leaf _ | Tab _ -> false
+  | HighlightError tr | HideInComment (_, tr) -> containsNewline tr
+  | Inner (l, _) -> List.exists containsNewline l
+
 let rec walkStmt : int -> stmt -> printing_tree =
 fun k stmt -> match stmt.stmt with
 
@@ -104,8 +112,11 @@ fun k stmt -> match stmt.stmt with
   | SExp e ->
       inner [walkExp k e; semi (strWorldEnv stmt)]
 
-  | SReturn(e) ->
-      inner [leaf "return "; walkExp k e; semi (strWorldEnv stmt)]
+  | SReturn e ->
+      inner [
+        leaf ~ann:stmt.extra_info_s "return ";
+        walkExp k e; semi (strWorldEnv stmt)
+      ]
 
   | SVarDecl (x, ({stmt = SVarAssign (x', e)} as s0)) when x = x' ->
       inner [leaf (spr "var %s = " x); walkExp k e; semi (strWorldEnv s0)]
@@ -257,6 +268,7 @@ fun k exp -> match exp.exp with
   | EObj [] ->
       leaf ~ann:(P.strPreTyp exp.pt_e) "{}"
 
+(*
   | EObj fes ->
       (* could insert Newlines when expressions are too long *)
       let l =
@@ -264,6 +276,22 @@ fun k exp -> match exp.exp with
           (fun (f,e) -> inner [leaf (spr "%s = " f); walkExp k e]) fes in
       let ann = P.strPreTyp exp.pt_e in
       inner ~ann [leaf "{ "; treeCommas l; leaf " }"]
+*)
+
+  | EObj fes ->
+      let walkFields k =
+        List.map
+          (fun (f,e) -> inner [leaf (spr "%s = " f); walkExp k e]) fes in
+      let ann = P.strPreTyp exp.pt_e in
+      let res = inner [leaf ~ann "{ "; treeCommas (walkFields k); leaf " }"] in
+      if not (containsNewline res) then
+        res
+      else
+        inner [
+          leaf ~ann "{"; Newline;
+          Tab (succ k); treeCommasAndNewlines (succ k) (walkFields (succ k));
+          Newline; Tab k; leaf "}"
+        ]
 
   | EObjRead (e1, e2) ->
       let ann = P.strPreTyp exp.pt_e in

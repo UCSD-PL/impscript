@@ -1,0 +1,31 @@
+extern val _eek : (U (num str null), U (num str null)) -> (bool);
+extern val _plus : (num, num) -> (num);
+extern val _minus : (num, num) -> (num);
+
+type numtree = mu 'x. {
+  item: num,
+  left: ?(ref('x)),
+  right: ?(ref('x)),
+  itemCheck: (all Lthis. ?(ref(Lthis)) / *Lthis: 'x) -> (num)
+};
+
+var makeTreeNode = function (all Lleft, Lright.
+                             left: ?(ref(Lleft)), right: ?(ref(Lright)), item: num
+                           / *Lleft: numtree, *Lright: numtree)
+                          -> (some Ltree. ref(Ltree) / *Ltree: numtree) {
+  (** TODO infer fold **)
+  return fold (numtree, {
+    item = item,
+    left = left,
+    right = right,
+    itemCheck = function (all Lthis. this: ?(ref(Lthis)) / *Lthis: numtree) -> (num) {
+      if (_eek(null, null)) {
+        return this.item;
+      } else {
+        return _plus(this.item, _minus(this.left.itemCheck(this.left), this.right.itemCheck(this.right)));
+      }
+    }
+  }
+  );
+};
+

@@ -1,0 +1,50 @@
+
+extern val _plus : (num, num) -> (num);
+extern val _minus : (num, num) -> (num);
+extern val _mult : (num, num) -> (num);
+extern val _eek : (U (num str), U (num str)) -> (bool);
+extern val _lt : (num, num) -> (bool);
+extern val _le : (num, num) -> (bool);
+extern val _ge : (num, num) -> (bool);
+
+var ack = function ack(m: num, n: num) -> (num) {
+  if (_eek(m, 0)) {
+    return _plus(n, 1);
+  } else {
+    undefined;
+  }
+  if (_eek(n, 0)) {
+    return ack(_minus(m, 1), 1);
+  } else {
+    undefined;
+  }
+  return ack(_minus(m, 1), ack(m, _minus(n, 1)));
+};
+
+var fib = function fib(n: num) -> (num) {
+  if (_lt(n, 2)) {
+    return 1;
+  } else {
+    undefined;
+  }
+  return _plus(fib(_minus(n, 2)), fib(_minus(n, 1)));
+};
+
+var tak = function tak(x: num, y: num, z: num) -> (num) {
+  if (_ge(y, x)) {
+    return z;
+  } else {
+    undefined;
+  }
+  return tak(tak(_minus(x, 1), y, z), tak(_minus(y, 1), z, x), tak(_minus(z, 1), x, y));
+};
+
+var i = 3;
+
+while (_le(i, 5)) {
+  ack(3, i);
+  fib(_plus(17, i));
+  tak(_plus(_mult(3, i), 3), _plus(_mult(2, i), 2), _plus(i, 1));
+  i = _plus(i, 1);
+  _minus(i, 1);
+}

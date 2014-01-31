@@ -1,0 +1,12 @@
+extern val _plus : (num, num) -> (num);
+
+var allocateObj = function (i:num) -> (some L. ref(L) / *L: {n:num, ...}) {
+  return {n=i, m=i};
+};
+
+var obj1 = allocateObj(1);
+var obj2 = allocateObj(2);
+
+_plus(obj1.n, obj2.n);
+
+_plus(obj1.n, obj2.m);

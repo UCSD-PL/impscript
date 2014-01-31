@@ -1,0 +1,31 @@
+
+extern val _eek : (U (num str null), U (num str null)) -> (bool);
+extern val _plus : (num, num) -> (num);
+extern val _minus : (num, num) -> (num);
+extern val _mult : (num, num) -> (num);
+extern val _gt : (num, num) -> (bool);
+
+type numtree = mu 'x. {
+  item: num,
+  left: ?(ref('x)),
+  right: ?(ref('x)),
+  itemCheck: (all Lthis. ?(ref(Lthis)) / *Lthis: 'x) -> (num)
+};
+
+extern val makeTreeNode :
+     (all Lleft, Lright. ?(ref(Lleft)), ?(ref(Lright)), num / *Lleft: numtree, *Lright: numtree)
+  -> (some Ltree. ref(Ltree) / *Ltree: numtree)
+;
+
+var bottomUpTree = function bottomUpTree (item: num, depth: num) -> (some Lout. ref(Lout) / *Lout: numtree) {
+   if (_gt (depth, 0)) {
+      return makeTreeNode(
+          bottomUpTree(_mult(2,_minus(item,1)), _minus(depth,1))
+         ,bottomUpTree(_mult(2,item), _minus(depth,1))
+         ,item
+      );
+   }
+   else {
+      return makeTreeNode(null,null,item);
+   }
+};

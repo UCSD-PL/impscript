@@ -597,7 +597,7 @@ fun t ->
 
 let synthesizeRecd : recd_type -> exp option =
 fun (TRecd(width,fts)) ->
-  let foo = function
+  let rec foo = function
     | TAny          
     | TBase TNum      -> Some (eInt 0)
     | TBase TStr      -> Some (eStr "")
@@ -605,6 +605,10 @@ fun (TRecd(width,fts)) ->
     | TBase TUndef    -> Some eUndef
     | TBase TNull     -> Some eNull
     | TMaybe _        -> Some eNull
+    | TArrow ((_, ts, _), ([], t, [])) ->
+        (match foo t with
+           | Some e -> Some (eFun (List.map (fun _ -> genSym ()) ts) (sExp e))
+           | None   -> None)
     | _               -> None
   in
   let maybeObj =
@@ -684,13 +688,14 @@ fun subst ->
 
 let freshen : loc_var list -> loc_subst =
 fun xs ->
-  let freshenOne x = genLocVar ~name:x () in
+  (* let freshenOne x = genLocVar ~name:x () in *)
+  let freshenOne x = genLocVar () in
   let ys = List.map freshenOne xs in
   List.combine xs (List.map (fun y -> LVar y) ys)
 
 let strLocSubst : loc_subst -> string =
 fun subst ->
-  String.concat ", "
+  String.concat "\n"
     (List.map (fun (lvar,loc) -> spr "%s := %s" lvar (strLoc loc)) subst)
 
 let transitiveAssumeVars f heapEnv =
@@ -765,6 +770,14 @@ type path             = field list
 type path_list        = (path * mu_type) list
 type rooted_path_list = loc * mu_type * path_list
 
+let strPathList : path_list -> string =
+fun l ->
+  commas (List.map (fun (fs,mu) -> spr "[%s] %s" (commas fs) (strMu mu)) l)
+
+let strRootedPathList : rooted_path_list -> string =
+fun (loc, mu, l) ->
+  spr "(%s, %s, %s)" (strLoc loc) (strMu mu) (strPathList l)
+
 let rec subAndFold
     : TypeEnv.t -> HeapEnv.t -> path -> typ -> typ
    -> path_list tri_result =
@@ -798,8 +811,10 @@ fun typeEnv heapEnv heap ->
   List.fold_left (fun acc (l,hb) ->
     let rec checkLoc l =
       match HeapEnv.lookupLoc l heapEnv, hb, !Settings.castInsertionMode with
-        (* TODO more permissive tests? *)
+        (* TODO more permissive tests?
         | Some HERecd rt1, HRecd rt2, _ when rt1 = rt2 -> acc
+        *)
+        | Some HERecd rt1, HRecd rt2, _ when recdSub rt1 rt2 -> acc
         | Some HEMu mu1,   HMu mu2, _   when mu1 = mu2 -> acc
         | Some HERecd rt1, HMu mu, true ->
             let root = [] in
@@ -836,6 +851,14 @@ fun typeEnv heapEnv ets lists ->
         | Some _, _, _ -> acc
         | None, TRefLoc l, Some lv when l = locRoot ->
             Some (makeFolds lv locRoot muRoot pathLists)
+(*
+        | None, TRefLoc l, None ->
+            (* TODO currently handling only case where don't need any folds
+               inside the object literal *)
+            (match e.exp, pathLists with
+               | EObj _, [] -> Some [eFold muRoot e]
+               | _ -> None)
+*)
         | _ -> None
     ) None ets in
 
@@ -1573,16 +1596,26 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
                       let err = "couldn't infer instantations at return" in
                       Err (sRet (eTcErr err e))
                   | Some (subst, heapEnv) ->
+                      let ann =
+                        if List.length subst = 0 then ""
+                        else spr "inferred location instantiations:\n\n%s" 
+                               (strLocSubst subst) in
                       let tGoal = applySubst subst tGoal in
                       let hGoal = applySubstToHeap subst hGoal in
                       run tcCoerce (true, typeEnv, heapEnv, e, t, tGoal)
-                        (fun e -> Err (sRet e))
+                        (fun e -> Err (stmtWithExtraInfo (sRet e) ann))
                         (fun e (heapEnv,out') ->
-                           let err = "expected heap not satisfied" in
                            let ets = [(e,t)] in
                            match heapSatWithFolds typeEnv heapEnv hGoal ets with
                              | No ->
-                                 Err (sRet (eTcErr err e))
+                                 let err =
+                                   spr "%s:\n\n%s\n\n%s:\n\n%s"
+                                     "Expected heap"
+                                     (strHeap hGoal)
+                                     "Not satisfied by current heap environment"
+                                     (AcePrinter.strHeapEnv heapEnv)
+                                 in
+                                 Err (stmtWithExtraInfo (sRet (eTcErr err e)) ann)
                              (*
                              | YesIf (true, folds) ->
                                  let sRetry = retryStmtForFolds folds in
@@ -1593,12 +1626,19 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
                                  (* inline backtracking *)
                                  let e' = inlineExpForFolds folds eOrig in
                                  run tcStmt (typeEnv, heapEnvOrig, sRet e')
-                                   (fun _ -> Err (sRet (eTcErr err e)))
+                                   (fun _ ->
+                                      let err =
+                                        spr "%s,\n%s"
+                                          "expected heap not satisfied"
+                                          "even after inlining folds and backtracking"
+                                      in
+                                      Err (stmtWithExtraInfo (sRet (eTcErr err e)) ann))
                                    (fun s stuff -> okS_ s stuff)
                              | Yes ->
                                  let out = MoreOut.combine out out' in
                                  let out = MoreOut.addRetType t out in
-                                 okS (sRet e) (finish (Typ TBot)) heapEnv out)))
+                                 let sRet = stmtWithExtraInfo (sRet e) ann in
+                                 okS sRet (finish (Typ TBot)) heapEnv out)))
 
     (* combination of SVarDecl, SVarAssign, EObj, and SSeq rules in order
        to allocate the object at Lx_%d *)
@@ -1766,17 +1806,25 @@ and __tcStmt (typeEnv, heapEnv, stmt) = match stmt.stmt with
         ) (RelySet.empty, RelySet.empty) xs
       in
       if not (RelySet.equal rely guarantee) then
-        Err (sClose xs (sTcErr "Rely != Guarantee" s))
+        let (s1,s2) = (strRelySet rely, strRelySet guarantee) in
+        let err = spr "Rely != Guarantee\n\n%s\n\n%s" s1 s2 in
+        Err (sClose xs (sTcErr err s))
       else
-        let (typeEnv,heapEnv) =
-          RelySet.fold (fun (x,t) (acc1,acc2) ->
-            (TypeEnv.addVar x (Val t) acc1, HeapEnv.removeVar x acc2)
-          ) rely (typeEnv, heapEnv)
+        let annFrozen = "Converted to invariant references:" in
+        let dashes = String.make (String.length annFrozen) '-' in
+        let annFrozen = spr "\n%s\n%s\n%s\n" dashes annFrozen dashes in
+        let (typeEnv,heapEnv,annFrozen) =
+          RelySet.fold (fun (x,t) (acc1,acc2,acc3) ->
+            let acc1 = TypeEnv.addVar x (Val t) acc1 in
+            let acc2 = HeapEnv.removeVar x acc2 in
+            let acc3 = spr "%s\n%s : ref (%s)" acc3 x (strTyp t) in
+            (acc1, acc2, acc3)
+          ) rely (typeEnv, heapEnv, annFrozen)
         in
         run tcStmt (typeEnv, heapEnv, s)
           (fun s -> Err (sClose xs s))
           (fun s stuff ->
-             let ann = AcePrinter.strHeapEnv heapEnv in
+             let ann = spr "%s\n%s" (AcePrinter.strHeapEnv heapEnv) annFrozen in
              let sClose = stmtWithExtraInfo (sClose xs s) ann in
              okS_ sClose stuff)
 

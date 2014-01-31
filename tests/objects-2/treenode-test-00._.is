@@ -1,0 +1,33 @@
+extern val _eek : (U (num str null), U (num str null)) -> (bool);
+extern val _plus : (num, num) -> (num);
+extern val _minus : (num, num) -> (num);
+
+type numtree = mu 'x. {
+  item: num,
+  left: ?(ref('x)),
+  right: ?(ref('x)),
+  itemCheck: (all Lthis. ref(Lthis) / *Lthis: 'x) -> (num)
+};
+
+var makeTreeNode = function (all Lleft, Lright.
+                             left: ?(ref(Lleft)), right: ?(ref(Lright)), item: num
+                           / *Lleft: numtree, *Lright: numtree)
+                          -> (some Ltree. ref(Ltree) / *Ltree: numtree) {
+  var x = {};
+  x.item = item;
+  x.left = left;
+  x.right = right;
+
+  x.itemCheck = function (all Lthis. this: ref(Lthis) / *Lthis: numtree) -> (num) {
+    if (_eek(null, null)) {
+      return this.item;
+    } else {
+      var l = this.left;
+      var r = this.right;
+      return _plus(this.item, _minus(l.itemCheck(l), r.itemCheck(r)));
+    }
+  };
+
+  return x;
+};
+

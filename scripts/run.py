@@ -18,6 +18,7 @@ test_dirs = [
 # '../tests/objects-0',
 # '../tests/objects-1',
   '../tests/objects-2',
+  '../tests/sunspider-0.9.1',
 ]
 
 def printHeader(color, s):

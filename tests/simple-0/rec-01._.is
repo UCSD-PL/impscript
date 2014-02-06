@@ -1,12 +1,13 @@
 extern val _minus : (num, num) -> (num);
 extern val _mult : (num, num) -> (num);
 extern val _le : (num, num) -> (bool);
-var fact; fact = function {*fact: (num) -> (num)} (n: num) -> (num) {
+
+var fact = function {*fact: (num) -> (num)} (n: num) -> (num) {
   if (_le(n, 0)) {
     return 1;
   } else {
     return _mult(n, fact(_minus(n, 1)));
   }
 };
-[close {fact};]
+
 fact(5);

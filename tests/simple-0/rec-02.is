@@ -1,9 +1,9 @@
 var f; f = undefined;
 var g; g = undefined;
-f = function {g: () -> (any)} () -> (any) {
+f = function {*g: () -> (any)} () -> (any) {
   g();
 };
-g = function {f: () -> (any)} () -> (any) {
+g = function {*f: () -> (any)} () -> (any) {
   f();
 };
 [close {f, g};]

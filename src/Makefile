@@ -10,6 +10,9 @@ all:
 	ocamlbuild $(LIBS) $(PARSE) $(LAM) $(STATS) -no-links main.native
 	ln -f -s _build/main.native impscript
 
+debug:
+	ocamlbuild $(LIBS) $(PARSE) $(LAM) $(STATS) -no-links main.d.byte
+
 loc:
 	wc -l lang.ml main.ml langUtils.ml                \
 	  utils.ml settings.ml log.ml                     \

@@ -49,6 +49,15 @@ let rec stmtOfBlock : block -> stmt = function
 
 let withDefault default opt = match opt with None -> default | Some x -> x
 
+let desugarRelyWith : typ option -> (var * typ option) list -> RelySet.t =
+fun targetTypeOpt ->
+  List.fold_left (fun acc (x,tOpt) ->
+    match tOpt, targetTypeOpt with
+      | Some t, _      -> RelySet.add (x, t) acc
+      | None,   Some t -> RelySet.add (x, t) acc
+      | None,   None   -> failwith "LangParser.desugarRely"
+  ) RelySet.empty
+
 %}
 
 %token <int> INT
@@ -69,6 +78,8 @@ let withDefault default opt = match opt with None -> default | Some x -> x
 
 %type <Lang.stmt> program
 %start program
+
+%start pre_type_eof      %type <Lang.pre_type> pre_type_eof
 
 %%
 
@@ -137,7 +148,8 @@ exp_ :
          | None, true, None, None, None -> (* no annotations *)
              EFun (xs, stmtOfBlock b)
          | _ ->
-             let r = withDefault RelySet.empty r in
+             (* let r = withDefault RelySet.empty r in *)
+             let r = desugarRelyWith None (withDefault [] r) in
              let allLocs = withDefault [] allLocs in
              let h1 = withDefault [] h1 in
              let tArgs = List.map (withDefault TAny) tArgs in
@@ -233,14 +245,17 @@ maybe_annotated_formal :
  | x=VAR COLON t=typ { (x, Some t) }
  | x=VAR             { (x, None) }
 
+(*
 annotated_formal :
  | x=VAR COLON t=typ { (x, t) }
+*)
 
 rely_set :
- | LBRACE r=separated_list(COMMA,annotated_formal) RBRACE
-     { List.fold_left
-         (fun acc (x,t) -> RelySet.add (x,t) acc)
-         RelySet.empty r }
+ | LBRACE l=separated_list(COMMA,rely_set_binding) RBRACE { l }
+
+rely_set_binding :
+ | STAR x=VAR COLON t=typ { (x, Some t) }
+ | STAR x=VAR             { (x, None)   }
 
 all_locs  : ALL  l=separated_list(COMMA,LVAR) DOT { l }
 some_locs : SOME l=separated_list(COMMA,LVAR) DOT { l }
@@ -257,5 +272,14 @@ heap_binding :
  | STAR l=loc COLON rt=recd_type   { (l, HRecd rt) }
 
 exp : e=exp_ { wrapExp e } (* TODO attach line info here... *)
+
+(******************************************************************************)
+
+pre_type_eof :
+ | t=typ EOF { Typ t }
+ | l=rely_set EQARROW arr=arrow_type EOF
+     { if l = []
+       then Typ (TArrow arr)
+       else OpenArrow (desugarRelyWith (Some (TArrow arr)) l, arr) }
 
 %%

@@ -1,4 +1,4 @@
 extern val _plus : (num, num) -> (num);
-var f; f = function {f: () -> (num)} () -> (num) {
+var f; f = function {*f: () -> (num)} () -> (num) {
   return _plus(1, f());
 };

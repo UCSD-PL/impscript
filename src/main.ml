@@ -130,7 +130,10 @@ let rec addPrelude prelude prog =
   match prelude.Lang.stmt with
     | Lang.SExternVal(x,t,s) -> LangUtils.sExtern x t (addPrelude s prog)
     | Lang.SLoadedSrc(f,s)   -> LangUtils.sLoaded f (addPrelude s prog)
+    | Lang.SExp _            -> LangUtils.sSeq [LangUtils.sBlankLine; prog]
+(*
     | Lang.SExp _            -> prog
+*)
     | _ -> failwith (spr "addPrelude\n%s" (Printer.strStmtAst prelude))
 
 

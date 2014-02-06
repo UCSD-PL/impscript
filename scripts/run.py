@@ -34,6 +34,8 @@ def runTests(color, header, pattern):
     for test_dir in test_dirs:
         print ""
         for top, _, files in os.walk(test_dir):
+            if test_dir <> top: # don't recurse into subdirectories
+              continue
             for nm in files:       
                 if re.match(pattern, nm):
                     f = os.path.join(top, nm)
@@ -42,11 +44,13 @@ def runTests(color, header, pattern):
                     os.system("./impscript %s %s | tail -1" % ("", f))
                     sys.stdout.flush()
 
-runTests(bcolors.YELLOW, "UNANNOTATED JAVASCRIPT (MAY FAIL)", ".*.js$")
+# runTests(bcolors.YELLOW, "UNANNOTATED JAVASCRIPT (MAY FAIL)", ".*.js$")
 
 runTests(bcolors.RED, "NEGATIVE TESTS", "^xx[^.]*.is$")
 runTests(bcolors.RED, "NEGATIVE TESTS", "^xx[^.]*._.is$")
+runTests(bcolors.RED, "NEGATIVE TESTS", "^xx[^.]*.js$")
 
 runTests(bcolors.GREEN, "POSITIVE TESTS", "[^x][^x][^.]*.is$")
 runTests(bcolors.GREEN, "POSITIVE TESTS", "[^x][^x][^.]*._.is$")
+runTests(bcolors.GREEN, "POSITIVE TESTS", "[^x][^x][^.]*.js$")
 

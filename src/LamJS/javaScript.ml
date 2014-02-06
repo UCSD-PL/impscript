@@ -271,6 +271,7 @@ module Pretty = struct
     | HintStmt (_, txt, s) ->
         vert [ horz [ text "/*:"; text txt; text "*/" ];
                stmt s ]
+    | BlankLine -> text "\n"
 
   let p_expr = expr
 

@@ -69,6 +69,10 @@ let double_quoted_string_char =
 
 
 rule token = parse
+
+   (* rkc *)
+   | '\n' blank* '\n' { Lexing.new_line lexbuf; Lexing.new_line lexbuf; BLANKLINE }
+
    | blank + { token lexbuf }
    | '\n' { new_line lexbuf; token lexbuf }
    | '\r' { new_line lexbuf; token lexbuf }

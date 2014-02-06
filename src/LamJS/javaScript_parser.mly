@@ -42,6 +42,8 @@ let rec expr_to_lvalue (e : expr) : lvalue =  match e with
 
 %token EOF
 
+%token BLANKLINE (* rkc *)
+
 (* http://stackoverflow.com/questions/1737460/
    how-to-find-shift-reduce-conflict-in-this-yacc-file *)
 %nonassoc GreaterThanColon
@@ -462,6 +464,9 @@ stmt :
       { VarDeclStmt (($startpos, $endpos),$2) }
   | With LParen expr RParen stmt
       { WithStmt ($3, $5) }
+
+  (* rkc 02/01/14 *)
+  | BLANKLINE { BlankLine }
 
 src_elt_block
   : LBrace src_elts RBrace 

@@ -1,0 +1,11 @@
+extern val _plus: (num, num) -> (num);
+
+var f = function {*f: () -> (num), *g: () -> (num)} () -> (num) {
+  return _plus (f(), g());
+};
+
+var g = function {*f: () -> (num)} () -> (num) {
+  return f();
+};
+
+f();

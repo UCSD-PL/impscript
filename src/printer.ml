@@ -70,13 +70,29 @@ and strFieldType (f,t) = spr "%s: %s" f (strTyp t)
 
 let strBinding = strFieldType
 
+and strDerefBinding (x,t) = spr "*%s: %s" x (strTyp t)
+
 let strRelySet h =
-  spr "{%s}" (commas (List.map strBinding (RelySet.elements h)))
+  spr "{%s}" (commas (List.map strDerefBinding (RelySet.elements h)))
+  (* spr "{%s}" (commas (List.map strBinding (RelySet.elements h))) *)
 
 let rec strPreTyp = function
   | Typ(t)             -> strTyp t
-  | OpenArrow(r,arrow) -> spr "%s %s" (strRelySet r) (strArrow arrow true)
   | Exists(l,pt)       -> spr "exists %s. %s" l (strPreTyp pt)
+  | OpenArrow(r,arrow) ->
+      let (acc1,acc2) =
+        List.fold_left (fun (acc1,acc2) -> function
+          | (x, TArrow y) when y = arrow -> ((spr "*%s" x) :: acc1, acc2)
+          | (x, t) -> (acc1, (spr "*%s: %s" x (strTyp t)) :: acc2)
+        ) ([],[]) (RelySet.elements r)
+      in
+      let l = (List.rev acc1) @ (List.rev acc2) in
+      if l = []
+      then strArrow arrow true
+      else spr "{%s} => %s" (commas l) (strArrow arrow true)
+(*
+  | OpenArrow(r,arrow) -> spr "%s %s" (strRelySet r) (strArrow arrow true)
+*)
 
 let tab k = String.make (2 * k) ' '
 
@@ -105,13 +121,12 @@ let rec strExp k exp = match exp.exp with
         (tab (succ k)) (clip (strStmt (succ k) body))
       (tab k)
   (* TODO attach poly arrow inline with func def *)
-  (* | EAs({exp=EFun(xs,body)},(Typ(TArrow(tArgs,tRet)) as tArrow)) -> *)
-  | EAs({exp=EFun(xs,body)},(Typ(TArrow(([],tArgs,[]),([],tRet,[]))) as tArrow)) ->
-      if List.length xs <> List.length tArgs then strEAs k exp tArrow
-      else strFunAs k xs body RelySet.empty tArgs tRet
-  | EAs({exp=EFun(xs,body)},(OpenArrow(r,(([],tArgs,[]),([],tRet,[]))) as tArrow)) ->
-      if List.length xs <> List.length tArgs then strEAs k exp tArrow
-      else strFunAs k xs body r tArgs tRet
+  | EAs({exp=EFun(xs,body)},Typ(TArrow(([],tArgs,[]),([],tRet,[]))))
+        when List.length xs = List.length tArgs ->
+      strFunAs k xs body RelySet.empty tArgs tRet
+  | EAs({exp=EFun(xs,body)},OpenArrow(r,(([],tArgs,[]),([],tRet,[]))))
+        when List.length xs = List.length tArgs ->
+      strFunAs k xs body r tArgs tRet
   | EAs(e,pt) -> strEAs k e pt
   (* | ECast(s,t) -> spr "(%s => %s)" (strTyp s) (strTyp t) *)
   | ECast(arrow) -> spr "(%s)" (strArrow arrow false)

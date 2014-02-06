@@ -1,4 +1,4 @@
-function fact(n) {
+function fact(n) /*: {*fact} => (num) -> (num) */ {
   if (n <= 0) {
     return 1;
   } else {

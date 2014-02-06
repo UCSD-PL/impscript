@@ -1,1 +1,1 @@
-var f = function () { return 1 + f(); };
+var f = function () /*: {*f} => () -> (num) */ { return 1 + f(); };

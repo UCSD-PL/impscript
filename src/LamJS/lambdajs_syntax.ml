@@ -180,6 +180,7 @@ let rec ds_expr (env : env) (expr : expr) : exp = match expr with
   | FuncStmtExpr (p, f, args, body) ->
       EOp2 (p, SetRef, EId (p, f), ds_expr env (FuncExpr (p, args, body)))
   | HintExpr (_, _, e) -> ds_expr env e
+  | BlankLineExpr -> failwith "rkc: haven't added BlankLine to LamJS"
 
 
 and ds_field env (p, x, e) = (p, x, ds_expr env e)

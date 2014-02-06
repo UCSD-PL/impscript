@@ -33,6 +33,7 @@ type expr
   | ThrowExpr of pos * expr
   | FuncStmtExpr of pos * id * id list * expr
   | HintExpr of pos * string * expr
+  | BlankLineExpr (* rkc *)
 
 and lvalue =
     VarLValue of pos * id
@@ -263,6 +264,8 @@ and stmt (s : S.stmt) = match s with
 
   | S.HintStmt (p, txt, s) -> HintExpr (p, txt, stmt s)
 
+  | S.BlankLine -> BlankLineExpr
+
 and forInit p (fi : S.forInit) = match fi with
     S.NoForInit -> ConstExpr (p, S.CUndefined)
   | S.ExprForInit e -> expr e
@@ -410,6 +413,7 @@ let rec locals expr = match expr with
   | ThrowExpr (_, e) -> locals e
   | FuncStmtExpr (_, f, _, _) -> IdSet.singleton f
   | HintExpr (_, _, e) -> locals e
+  | BlankLineExpr -> IdSet.empty
 
 and lv_locals lvalue = match lvalue with
     VarLValue _ -> IdSet.empty

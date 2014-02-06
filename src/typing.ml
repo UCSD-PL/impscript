@@ -234,9 +234,13 @@ fun typeEnv ->
 and wfRely : TypeEnv.t -> rely -> bool =
 fun typeEnv ->
   RelySet.for_all (fun (x,t) ->
+    wfTyp typeEnv t
+    (* NOTE: allowing variables not yet defined to be mentioned,
+             so that don't need to lift var decls...
     match TypeEnv.lookupType x typeEnv with
       | Some StrongRef -> wfTyp typeEnv t
       | _              -> false
+    *)
   )
 
 let wfMuAbbrev : TypeEnv.t -> (ty_var list * mu_type) -> bool =
@@ -1267,8 +1271,12 @@ and tcBareFun typeEnv heapEnv xs body =
 (* simpler version of tcAnnotatedFunPoly for pure arrows *)
 and tcAnnotatedFun typeEnv heapEnv xs body rely tArgs tRet =
   let origArrow = OpenArrow (rely, (([], tArgs, []), ([], tRet, []))) in
-  if List.length xs <> List.length tArgs
-    then failwith "add handling for len(actuals) != len(formals)";
+  if not (wfPreType typeEnv origArrow) then
+    Err (eTcErr "arrow not well-formed" (eAs (eFun xs body) origArrow))
+  else if List.length xs <> List.length tArgs
+    then failwith "add handling for len(actuals) != len(formals)"
+  else
+
   let typeEnv = TypeEnv.addRetWorld ([], tRet, []) typeEnv in
   let (typeEnv,heapEnvFun) =
     List.fold_left (fun (acc1,acc2) (x,t) ->

@@ -13,6 +13,20 @@ module IdSetExt = Prelude.IdSetExt
 module StrSet = Utils.StrSet
 
 
+(***** Parsing ImpScript annotations ******************************************)
+
+let parseWith production cap s =
+  try production LangLexer.token (Lexing.from_string s)
+  with Lang.Parse_error(x) ->
+         Log.printParseErr
+           (spr "couldn't parse annotation as [%s]:\n\n[%s]\n\n%s" cap s x)
+     | LangParser.Error -> (* menhir *)
+         Log.printParseErr
+           (spr "couldn't parse annotation as [%s]:\n\n[%s]" cap s)
+
+let parsePreType s = parseWith LangParser.pre_type_eof "arrow type" s
+
+
 (***** Desugaring expressions *************************************************)
 
 type env = { vars: unit IdMap.t; funcNum: int }
@@ -46,9 +60,9 @@ and dsExp_ (env:env) = function
   | E.ConstExpr (_, c) -> dsConst c
 
   (**  x  *********************************************************************)
-  | E.VarExpr (p, x) -> EVarRead x
-
-  | E.IdExpr (p, x) -> failwith "ds_ id"
+  | E.VarExpr (p, "undefined") -> EBase VUndef
+  | E.VarExpr (p, x)           -> EVarRead x
+  | E.IdExpr (p, x)            -> failwith "ds_ id"
 
   (**  { f1:e1, f2:e2, ... }  *************************************************)
   | E.ObjectExpr (_, fes) ->
@@ -106,10 +120,17 @@ and dsExp_ (env:env) = function
       let env = List.fold_left (fun acc x -> addVar x acc) env args in
       EFun (args, dsStmt env body)
 
+  (**  /*: T */ e  ************************************************************)
+  | E.HintExpr (_, hint, e) ->
+      EAs (dsExp env e, parsePreType hint)
+
   | _ -> failwith "dsExp match failure"
 
 and dsStmt_ env e = match e with
 
+  | E.BlankLineExpr -> SBlankLine
+
+  | E.HintExpr _
   | E.ConstExpr _
   | E.VarExpr _
   | E.IdExpr _
@@ -140,6 +161,13 @@ and dsStmt_ env e = match e with
   (**  var x = e1; e2  ********************************************************)
   | E.SeqExpr (_, E.VarDeclExpr (_, x, e1), e2) ->
       dsVarDecl env x (Some e1) e2
+
+  (**  function f(args) /*: T */ { body }; e2  ********************************)
+  | E.SeqExpr (p0, E.HintExpr (_, hint, E.FuncStmtExpr (p, f, args, body)), e2) ->
+      let eFun = dsExp env (E.FuncExpr (p, args, body)) in
+      let eFun = eAs eFun (parsePreType hint) in
+      let s2 = dsStmt (addVar f env) e2 in
+      SVarDecl (f, sSeq [sAssign f eFun; s2])
 
   (**  function f(args){ body }; e2  ******************************************)
   | E.SeqExpr (p0, E.FuncStmtExpr (p, f, args, body), e2) ->
@@ -176,7 +204,6 @@ and dsStmt_ env e = match e with
   | E.TryFinallyExpr _ -> failwith "dsStmt try"
   | E.ThrowExpr _ -> failwith "dsStmt throw"
   | E.FuncStmtExpr _ -> failwith "dsStmt func"
-  | E.HintExpr _ -> failwith "dsStmt hint"
 
 and dsVarDecl env x xInit s =
   let s = dsStmt (addVar x env) s in

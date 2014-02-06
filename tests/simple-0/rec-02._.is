@@ -1,0 +1,10 @@
+
+var f = function {*g: () -> (any)} () -> (any) {
+  g();
+};
+
+var g = function {*f: () -> (any)} () -> (any) {
+  f();
+};
+
+f();

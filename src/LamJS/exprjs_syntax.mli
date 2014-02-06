@@ -44,6 +44,7 @@ type expr
       (** We leave function statements in place, so that they can be lifted
           for JavaScript to turned into letrecs for Typed JavaScript. *)
   | HintExpr of pos * string * expr
+  | BlankLineExpr
 
 
 and lvalue =
